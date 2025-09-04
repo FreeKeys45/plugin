@@ -1,0 +1,1908 @@
+<?php
+/*
+Plugin Name: Fake Sales Notification
+Description: Advanced fake sales notification system with AI-powered behavior patterns, extensive customization, and Woodmart theme integration.
+Version: 2.0.0
+Author: Sabir Shah
+License: GPLv2 or later
+Text Domain: fake-sales-notification
+*/
+
+if (!defined('ABSPATH')) exit;
+
+class Fake_Sales_Notification {
+    
+    private $option_key = 'fsn_options';
+    private $stats_key = 'fsn_stats';
+    private $defaults;
+    
+    public function __construct() {
+        $this->defaults = [
+            // Core Settings
+            'enabled' => 1,
+            'min_sales' => 2,
+            'max_sales' => 500,
+            'message_template' => '{count} people bought {product} in the last 24 hours',
+            'interval_seconds' => 15,
+            'duration_seconds' => 5,
+            'initial_delay' => 3,
+            
+            // Advanced Behavior
+            'behavior_pattern' => 'realistic',
+            'peak_hours' => '19-22',
+            'low_hours' => '2-5',
+            'weekend_multiplier' => 1.5,
+            'smart_frequency' => 1,
+            'session_limit' => 5,
+            'conversion_boost' => 0,
+            
+            // Placement & Visibility
+            'position_desktop' => 'bottom_right',
+            'position_mobile' => 'bottom_left',
+            'show_on_product' => 1,
+            'show_on_shop' => 1,
+            'show_on_category' => 1,
+            'show_on_home' => 1,
+            'show_on_cart' => 0,
+            'show_on_checkout' => 0,
+            'exclude_pages' => '',
+            'include_pages' => '',
+            
+            // Woodmart Integration
+            'woodmart_style' => 'modern',
+            'woodmart_animation' => 'fade',
+            'woodmart_position_override' => 0,
+            'woodmart_responsive_breakpoint' => 1024,
+            
+            // Appearance
+            'bg_color' => '#111827',
+            'text_color' => '#ffffff',
+            'accent_color' => '#10b981',
+            'border_radius' => 12,
+            'shadow' => 1,
+            'shadow_intensity' => 3,
+            'font_size' => 14,
+            'font_family' => 'inherit',
+            'max_width' => 340,
+            'z_index' => 99999,
+            'close_button' => 1,
+            'avatar' => 1,
+            'product_image' => 1,
+            'timestamp' => 1,
+            
+            // Button Settings
+            'show_button' => 0,
+            'button_label' => 'View Product',
+            'button_action' => 'product',
+            'button_bg' => '#2563eb',
+            'button_text' => '#ffffff',
+            'button_radius' => 8,
+            
+            // Mobile Settings
+            'mobile_compact' => 1,
+            'mobile_scale' => 0.92,
+            'mobile_position_fixed' => 1,
+            'hide_on_mobile' => 0,
+            
+            // Analytics & Tracking
+            'enable_analytics' => 1,
+            'track_clicks' => 1,
+            'track_views' => 1,
+            'conversion_tracking' => 1,
+            
+            // Advanced Options
+            'geo_targeting' => 0,
+            'device_targeting' => 0,
+            'user_role_targeting' => 0,
+            'schedule_days' => '',
+            'schedule_hours' => '',
+            'debug_mode' => 0,
+        ];
+        
+        // Initialize plugin
+        add_action('admin_menu', [$this, 'add_menu']);
+        add_action('admin_init', [$this, 'register_settings']);
+        add_action('admin_enqueue_scripts', [$this, 'admin_enqueue_scripts']);
+        add_action('wp_enqueue_scripts', [$this, 'enqueue_assets']);
+        add_action('init', [$this, 'woocommerce_hooks']);
+        add_action('wp_ajax_fsn_track', [$this, 'track_interaction']);
+        add_action('wp_ajax_nopriv_fsn_track', [$this, 'track_interaction']);
+        
+        // Activation hook
+        register_activation_hook(__FILE__, [$this, 'activate']);
+    }
+    
+    /**
+     * Plugin activation tasks
+     */
+    public function activate() {
+        // Initialize stats
+        if (!get_option($this->stats_key)) {
+            update_option($this->stats_key, [
+                'total_shown' => 0,
+                'total_clicks' => 0,
+                'conversions' => 0,
+                'start_date' => current_time('mysql')
+            ]);
+        }
+    }
+    
+    /**
+     * Enqueue admin scripts
+     */
+    public function admin_enqueue_scripts($hook) {
+        if ($hook === 'toplevel_page_fake-sales-notification' || $hook === 'fake-sales-notification_page_fake-sales-analytics') {
+            wp_enqueue_style('wp-color-picker');
+            wp_enqueue_script('wp-color-picker');
+            
+            // Add custom admin script
+            wp_add_inline_script('wp-color-picker', '
+                jQuery(document).ready(function($) {
+                    $(".fsn-color-picker").wpColorPicker();
+                    
+                    // Range slider value display
+                    $(".fsn-range-slider").on("input", function() {
+                        $(this).next(".fsn-range-value").text($(this).val());
+                    });
+                });
+            ');
+        }
+    }
+    
+    /**
+     * Get plugin options with defaults
+     */
+    private function get_options() {
+        $stored = get_option($this->option_key, []);
+        return wp_parse_args($stored, $this->defaults);
+    }
+    
+    /**
+     * Get plugin statistics
+     */
+    private function get_stats() {
+        return get_option($this->stats_key, [
+            'total_shown' => 0,
+            'total_clicks' => 0,
+            'conversions' => 0,
+            'start_date' => current_time('mysql')
+        ]);
+    }
+    
+    /**
+     * Update plugin statistics
+     */
+    private function update_stats($type, $value = 1) {
+        $stats = $this->get_stats();
+        if (isset($stats[$type])) {
+            $stats[$type] += $value;
+            update_option($this->stats_key, $stats);
+        }
+    }
+    
+    /**
+     * Track user interactions
+     */
+    public function track_interaction() {
+        check_ajax_referer('fsn_nonce', 'nonce');
+        
+        $type = isset($_POST['type']) ? sanitize_text_field($_POST['type']) : '';
+        $product_id = isset($_POST['product_id']) ? intval($_POST['product_id']) : 0;
+        
+        if ($type === 'click') {
+            $this->update_stats('total_clicks');
+        } elseif ($type === 'view') {
+            $this->update_stats('total_shown');
+        } elseif ($type === 'conversion' && $product_id > 0) {
+            $this->update_stats('conversions');
+        }
+        
+        wp_send_json_success();
+    }
+    
+    /**
+     * Add admin menu
+     */
+    public function add_menu() {
+        // Main menu page
+        add_menu_page(
+            'Fake Sales Notification Settings',
+            'Fake Sales Notification',
+            'manage_options',
+            'fake-sales-notification',
+            [$this, 'render_settings_page'],
+            'dashicons-megaphone',
+            59
+        );
+        
+        // Settings submenu
+        add_submenu_page(
+            'fake-sales-notification',
+            'Settings',
+            'Settings',
+            'manage_options',
+            'fake-sales-notification',
+            [$this, 'render_settings_page']
+        );
+        
+        // Analytics submenu
+        add_submenu_page(
+            'fake-sales-notification',
+            'Analytics',
+            'Analytics',
+            'manage_options',
+            'fake-sales-analytics',
+            [$this, 'render_analytics_page']
+        );
+    }
+    
+    /**
+     * Register settings
+     */
+    public function register_settings() {
+        // Register the main setting
+        register_setting('fsn_settings_group', $this->option_key, [$this, 'sanitize_options']);
+        
+        // Core Settings Section
+        add_settings_section(
+            'fsn_core_settings',
+            'Core Settings',
+            function() {
+                echo '<p>Configure the basic settings for your fake sales notifications.</p>';
+            },
+            'fsn_settings_group'
+        );
+        
+        // Core Settings Fields
+        add_settings_field(
+            'enabled',
+            'Enable Notifications',
+            [$this, 'render_checkbox_field'],
+            'fsn_settings_group',
+            'fsn_core_settings',
+            [
+                'id' => 'enabled',
+                'label' => 'Enable fake sales notifications'
+            ]
+        );
+        
+        add_settings_field(
+            'min_sales',
+            'Minimum Sales',
+            [$this, 'render_number_field'],
+            'fsn_settings_group',
+            'fsn_core_settings',
+            [
+                'id' => 'min_sales',
+                'min' => 0,
+                'step' => 1,
+                'description' => 'Minimum number of sales to show in notifications'
+            ]
+        );
+        
+        add_settings_field(
+            'max_sales',
+            'Maximum Sales',
+            [$this, 'render_number_field'],
+            'fsn_settings_group',
+            'fsn_core_settings',
+            [
+                'id' => 'max_sales',
+                'min' => 0,
+                'step' => 1,
+                'description' => 'Maximum number of sales to show in notifications'
+            ]
+        );
+        
+        add_settings_field(
+            'message_template',
+            'Message Template',
+            [$this, 'render_textarea_field'],
+            'fsn_settings_group',
+            'fsn_core_settings',
+            [
+                'id' => 'message_template',
+                'description' => 'Available tokens: {count}, {product}, {location}, {time}, {name}'
+            ]
+        );
+        
+        add_settings_field(
+            'interval_seconds',
+            'Popup Interval (seconds)',
+            [$this, 'render_number_field'],
+            'fsn_settings_group',
+            'fsn_core_settings',
+            [
+                'id' => 'interval_seconds',
+                'min' => 5,
+                'step' => 1,
+                'description' => 'Time between showing notifications'
+            ]
+        );
+        
+        add_settings_field(
+            'duration_seconds',
+            'Display Duration (seconds)',
+            [$this, 'render_number_field'],
+            'fsn_settings_group',
+            'fsn_core_settings',
+            [
+                'id' => 'duration_seconds',
+                'min' => 3,
+                'step' => 1,
+                'description' => 'How long each notification stays visible'
+            ]
+        );
+        
+        // Behavior Settings Section
+        add_settings_section(
+            'fsn_behavior_settings',
+            'Behavior Patterns',
+            function() {
+                echo '<p>Configure how notifications behave based on time and user interaction.</p>';
+            },
+            'fsn_settings_group'
+        );
+        
+        add_settings_field(
+            'behavior_pattern',
+            'Behavior Pattern',
+            [$this, 'render_select_field'],
+            'fsn_settings_group',
+            'fsn_behavior_settings',
+            [
+                'id' => 'behavior_pattern',
+                'options' => [
+                    'realistic' => 'Realistic (varies by time)',
+                    'constant' => 'Constant frequency',
+                    'increasing' => 'Increasing over time',
+                    'decreasing' => 'Decreasing over time'
+                ],
+                'description' => 'How notifications frequency changes over time'
+            ]
+        );
+        
+        add_settings_field(
+            'peak_hours',
+            'Peak Shopping Hours',
+            [$this, 'render_text_field'],
+            'fsn_settings_group',
+            'fsn_behavior_settings',
+            [
+                'id' => 'peak_hours',
+                'description' => 'Format: 19-22 (7PM-10PM)'
+            ]
+        );
+        
+        add_settings_field(
+            'low_hours',
+            'Low Shopping Hours',
+            [$this, 'render_text_field'],
+            'fsn_settings_group',
+            'fsn_behavior_settings',
+            [
+                'id' => 'low_hours',
+                'description' => 'Format: 2-5 (2AM-5AM)'
+            ]
+        );
+        
+        add_settings_field(
+            'weekend_multiplier',
+            'Weekend Multiplier',
+            [$this, 'render_number_field'],
+            'fsn_settings_group',
+            'fsn_behavior_settings',
+            [
+                'id' => 'weekend_multiplier',
+                'min' => 0.1,
+                'max' => 5,
+                'step' => 0.1,
+                'description' => 'Multiplier for notification frequency on weekends'
+            ]
+        );
+        
+        // Placement Settings Section
+        add_settings_section(
+            'fsn_placement_settings',
+            'Placement & Visibility',
+            function() {
+                echo '<p>Configure where and when notifications appear on your site.</p>';
+            },
+            'fsn_settings_group'
+        );
+        
+        add_settings_field(
+            'position_desktop',
+            'Desktop Position',
+            [$this, 'render_select_field'],
+            'fsn_settings_group',
+            'fsn_placement_settings',
+            [
+                'id' => 'position_desktop',
+                'options' => [
+                    'bottom_left' => 'Bottom Left',
+                    'bottom_right' => 'Bottom Right',
+                    'top_left' => 'Top Left',
+                    'top_right' => 'Top Right',
+                    'center_bottom' => 'Center Bottom',
+                    'center_top' => 'Center Top'
+                ],
+                'description' => 'Where notifications appear on desktop'
+            ]
+        );
+        
+        add_settings_field(
+            'position_mobile',
+            'Mobile Position',
+            [$this, 'render_select_field'],
+            'fsn_settings_group',
+            'fsn_placement_settings',
+            [
+                'id' => 'position_mobile',
+                'options' => [
+                    'bottom_left' => 'Bottom Left',
+                    'bottom_right' => 'Bottom Right',
+                    'top_left' => 'Top Left',
+                    'top_right' => 'Top Right'
+                ],
+                'description' => 'Where notifications appear on mobile'
+            ]
+        );
+        
+        // Appearance Settings Section
+        add_settings_section(
+            'fsn_appearance_settings',
+            'Appearance',
+            function() {
+                echo '<p>Customize the look and feel of your notifications.</p>';
+            },
+            'fsn_settings_group'
+        );
+        
+        add_settings_field(
+            'bg_color',
+            'Background Color',
+            [$this, 'render_color_field'],
+            'fsn_settings_group',
+            'fsn_appearance_settings',
+            [
+                'id' => 'bg_color',
+                'description' => 'Notification background color'
+            ]
+        );
+        
+        add_settings_field(
+            'text_color',
+            'Text Color',
+            [$this, 'render_color_field'],
+            'fsn_settings_group',
+            'fsn_appearance_settings',
+            [
+                'id' => 'text_color',
+                'description' => 'Notification text color'
+            ]
+        );
+        
+        add_settings_field(
+            'accent_color',
+            'Accent Color',
+            [$this, 'render_color_field'],
+            'fsn_settings_group',
+            'fsn_appearance_settings',
+            [
+                'id' => 'accent_color',
+                'description' => 'Color for accents and highlights'
+            ]
+        );
+        
+        add_settings_field(
+            'border_radius',
+            'Border Radius (px)',
+            [$this, 'render_number_field'],
+            'fsn_settings_group',
+            'fsn_appearance_settings',
+            [
+                'id' => 'border_radius',
+                'min' => 0,
+                'step' => 1,
+                'description' => 'Corner roundness of notifications'
+            ]
+        );
+        
+        // Woodmart Settings Section
+        add_settings_section(
+            'fsn_woodmart_settings',
+            'Woodmart Integration',
+            function() {
+                echo '<p>Settings specific to Woodmart theme integration.</p>';
+            },
+            'fsn_settings_group'
+        );
+        
+        add_settings_field(
+            'woodmart_style',
+            'Woodmart Style',
+            [$this, 'render_select_field'],
+            'fsn_settings_group',
+            'fsn_woodmart_settings',
+            [
+                'id' => 'woodmart_style',
+                'options' => [
+                    'modern' => 'Modern',
+                    'classic' => 'Classic',
+                    'minimal' => 'Minimal'
+                ],
+                'description' => 'Style preset that matches Woodmart design'
+            ]
+        );
+        
+        add_settings_field(
+            'woodmart_animation',
+            'Animation Style',
+            [$this, 'render_select_field'],
+            'fsn_settings_group',
+            'fsn_woodmart_settings',
+            [
+                'id' => 'woodmart_animation',
+                'options' => [
+                    'fade' => 'Fade',
+                    'slide' => 'Slide',
+                    'bounce' => 'Bounce'
+                ],
+                'description' => 'Animation when notifications appear'
+            ]
+        );
+        
+        // Button Settings Section
+        add_settings_section(
+            'fsn_button_settings',
+            'Button Settings',
+            function() {
+                echo '<p>Configure the call-to-action button in notifications.</p>';
+            },
+            'fsn_settings_group'
+        );
+        
+        add_settings_field(
+            'show_button',
+            'Show Button',
+            [$this, 'render_checkbox_field'],
+            'fsn_settings_group',
+            'fsn_button_settings',
+            [
+                'id' => 'show_button',
+                'label' => 'Show call-to-action button in notifications'
+            ]
+        );
+        
+        add_settings_field(
+            'button_label',
+            'Button Label',
+            [$this, 'render_text_field'],
+            'fsn_settings_group',
+            'fsn_button_settings',
+            [
+                'id' => 'button_label',
+                'description' => 'Text to display on the button'
+            ]
+        );
+        
+        add_settings_field(
+            'button_bg',
+            'Button Background',
+            [$this, 'render_color_field'],
+            'fsn_settings_group',
+            'fsn_button_settings',
+            [
+                'id' => 'button_bg',
+                'description' => 'Background color of the button'
+            ]
+        );
+        
+        add_settings_field(
+            'button_text',
+            'Button Text Color',
+            [$this, 'render_color_field'],
+            'fsn_settings_group',
+            'fsn_button_settings',
+            [
+                'id' => 'button_text',
+                'description' => 'Text color of the button'
+            ]
+        );
+        
+        // Mobile Settings Section
+        add_settings_section(
+            'fsn_mobile_settings',
+            'Mobile Settings',
+            function() {
+                echo '<p>Settings specific to mobile devices.</p>';
+            },
+            'fsn_settings_group'
+        );
+        
+        add_settings_field(
+            'mobile_compact',
+            'Compact Style',
+            [$this, 'render_checkbox_field'],
+            'fsn_settings_group',
+            'fsn_mobile_settings',
+            [
+                'id' => 'mobile_compact',
+                'label' => 'Use compact style on mobile devices'
+            ]
+        );
+        
+        add_settings_field(
+            'mobile_scale',
+            'Mobile Scale',
+            [$this, 'render_number_field'],
+            'fsn_settings_group',
+            'fsn_mobile_settings',
+            [
+                'id' => 'mobile_scale',
+                'min' => 0.5,
+                'max' => 1,
+                'step' => 0.01,
+                'description' => 'Scale factor for notifications on mobile'
+            ]
+        );
+        
+        add_settings_field(
+            'hide_on_mobile',
+            'Hide on Mobile',
+            [$this, 'render_checkbox_field'],
+            'fsn_settings_group',
+            'fsn_mobile_settings',
+            [
+                'id' => 'hide_on_mobile',
+                'label' => 'Hide notifications on mobile devices'
+            ]
+        );
+        
+        // Advanced Settings Section
+        add_settings_section(
+            'fsn_advanced_settings',
+            'Advanced Options',
+            function() {
+                echo '<p>Advanced settings for fine-tuning notification behavior.</p>';
+            },
+            'fsn_settings_group'
+        );
+        
+        add_settings_field(
+            'enable_analytics',
+            'Enable Analytics',
+            [$this, 'render_checkbox_field'],
+            'fsn_settings_group',
+            'fsn_advanced_settings',
+            [
+                'id' => 'enable_analytics',
+                'label' => 'Track notification performance'
+            ]
+        );
+        
+        add_settings_field(
+            'schedule_days',
+            'Schedule Days',
+            [$this, 'render_text_field'],
+            'fsn_settings_group',
+            'fsn_advanced_settings',
+            [
+                'id' => 'schedule_days',
+                'description' => 'Comma-separated days (1-7, where 1 is Monday)'
+            ]
+        );
+        
+        add_settings_field(
+            'schedule_hours',
+            'Schedule Hours',
+            [$this, 'render_text_field'],
+            'fsn_settings_group',
+            'fsn_advanced_settings',
+            [
+                'id' => 'schedule_hours',
+                'description' => 'Format: 9-17 (9AM-5PM)'
+            ]
+        );
+        
+        add_settings_field(
+            'debug_mode',
+            'Debug Mode',
+            [$this, 'render_checkbox_field'],
+            'fsn_settings_group',
+            'fsn_advanced_settings',
+            [
+                'id' => 'debug_mode',
+                'label' => 'Enable debug mode for troubleshooting'
+            ]
+        );
+    }
+    
+    /**
+     * Render settings page
+     */
+    public function render_settings_page() {
+        if (!current_user_can('manage_options')) {
+            return;
+        }
+        ?>
+        <div class="wrap">
+            <h1><?php echo esc_html(get_admin_page_title()); ?></h1>
+            
+            <form action="options.php" method="post">
+                <?php
+                settings_fields('fsn_settings_group');
+                do_settings_sections('fsn_settings_group');
+                submit_button('Save Settings', 'primary', 'submit', true, ['id' => 'save-settings']);
+                ?>
+            </form>
+        </div>
+        <?php
+    }
+    
+    /**
+     * Render analytics page
+     */
+    public function render_analytics_page() {
+        if (!current_user_can('manage_options')) return;
+        
+        $stats = $this->get_stats();
+        $start_date = new DateTime($stats['start_date']);
+        $current_date = new DateTime();
+        $days_running = $current_date->diff($start_date)->days;
+        
+        $click_rate = $stats['total_shown'] > 0 ? ($stats['total_clicks'] / $stats['total_shown']) * 100 : 0;
+        $conversion_rate = $stats['total_clicks'] > 0 ? ($stats['conversions'] / $stats['total_clicks']) * 100 : 0;
+        
+        ?>
+        <div class="wrap">
+            <h1>Fake Sales Notification Analytics</h1>
+            
+            <div class="fsn-analytics-container">
+                <div class="fsn-analytics-card">
+                    <h3>Performance Overview</h3>
+                    <table class="form-table">
+                        <tr>
+                            <th>Total Notifications Shown</th>
+                            <td><?php echo number_format($stats['total_shown']); ?></td>
+                        </tr>
+                        <tr>
+                            <th>Total Button Clicks</th>
+                            <td><?php echo number_format($stats['total_clicks']); ?></td>
+                        </tr>
+                        <tr>
+                            <th>Conversions</th>
+                            <td><?php echo number_format($stats['conversions']); ?></td>
+                        </tr>
+                        <tr>
+                            <th>Click Rate</th>
+                            <td><?php echo number_format($click_rate, 2); ?>%</td>
+                        </tr>
+                        <tr>
+                            <th>Conversion Rate</th>
+                            <td><?php echo number_format($conversion_rate, 2); ?>%</td>
+                        </tr>
+                        <tr>
+                            <th>Days Running</th>
+                            <td><?php echo $days_running; ?></td>
+                        </tr>
+                    </table>
+                </div>
+                
+                <div class="fsn-analytics-card">
+                    <h3>Daily Averages</h3>
+                    <table class="form-table">
+                        <tr>
+                            <th>Notifications per Day</th>
+                            <td><?php echo $days_running > 0 ? number_format($stats['total_shown'] / $days_running, 1) : '0'; ?></td>
+                        </tr>
+                        <tr>
+                            <th>Clicks per Day</th>
+                            <td><?php echo $days_running > 0 ? number_format($stats['total_clicks'] / $days_running, 1) : '0'; ?></td>
+                        </tr>
+                        <tr>
+                            <th>Conversions per Day</th>
+                            <td><?php echo $days_running > 0 ? number_format($stats['conversions'] / $days_running, 1) : '0'; ?></td>
+                        </tr>
+                    </table>
+                </div>
+            </div>
+            
+            <div class="fsn-analytics-actions">
+                <button type="button" id="fsn-reset-stats" class="button button-secondary">Reset Statistics</button>
+            </div>
+        </div>
+        
+        <script>
+            jQuery(document).ready(function($) {
+                $('#fsn-reset-stats').on('click', function() {
+                    if (confirm('Are you sure you want to reset all statistics? This action cannot be undone.')) {
+                        $.ajax({
+                            url: ajaxurl,
+                            type: 'POST',
+                            data: {
+                                action: 'fsn_reset_stats',
+                                nonce: '<?php echo wp_create_nonce('fsn_reset_stats'); ?>'
+                            },
+                            success: function(response) {
+                                if (response.success) {
+                                    location.reload();
+                                }
+                            }
+                        });
+                    }
+                });
+            });
+        </script>
+        
+        <style>
+            .fsn-analytics-container {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 20px;
+                margin-top: 20px;
+            }
+            
+            .fsn-analytics-card {
+                flex: 1;
+                min-width: 300px;
+                background: #fff;
+                border: 1px solid #ccd0d4;
+                box-shadow: 0 1px 1px rgba(0,0,0,.04);
+                padding: 15px;
+            }
+            
+            .fsn-analytics-card h3 {
+                margin-top: 0;
+                padding-bottom: 10px;
+                border-bottom: 1px solid #eee;
+            }
+            
+            .fsn-analytics-actions {
+                margin-top: 20px;
+            }
+        </style>
+        <?php
+    }
+    
+    /**
+     * Reset statistics
+     */
+    public function reset_stats() {
+        check_ajax_referer('fsn_reset_stats', 'nonce');
+        
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error('Permission denied');
+        }
+        
+        update_option($this->stats_key, [
+            'total_shown' => 0,
+            'total_clicks' => 0,
+            'conversions' => 0,
+            'start_date' => current_time('mysql')
+        ]);
+        
+        wp_send_json_success();
+    }
+    
+    /**
+     * Sanitize options
+     */
+    public function sanitize_options($input) {
+        $clean = $this->get_options();
+        
+        // Boolean fields
+        $bools = [
+            'enabled', 'smart_frequency', 'show_on_product', 'show_on_shop', 'show_on_category', 
+            'show_on_home', 'show_on_cart', 'show_on_checkout', 'woodmart_position_override', 
+            'shadow', 'close_button', 'avatar', 'product_image', 'timestamp', 'show_button', 
+            'mobile_compact', 'mobile_position_fixed', 'hide_on_mobile', 'enable_analytics', 
+            'track_clicks', 'track_views', 'conversion_tracking', 'geo_targeting', 
+            'device_targeting', 'user_role_targeting', 'debug_mode'
+        ];
+        
+        foreach ($bools as $b) {
+            $clean[$b] = isset($input[$b]) ? 1 : 0;
+        }
+        
+        // Integer fields
+        $ints = [
+            'min_sales', 'max_sales', 'interval_seconds', 'duration_seconds', 'initial_delay',
+            'session_limit', 'conversion_boost', 'woodmart_responsive_breakpoint', 'border_radius',
+            'shadow_intensity', 'font_size', 'max_width', 'z_index', 'button_radius'
+        ];
+        
+        foreach ($ints as $i) {
+            if (isset($input[$i])) {
+                $clean[$i] = max(0, intval($input[$i]));
+            }
+        }
+        
+        // Float fields
+        $floats = ['weekend_multiplier', 'mobile_scale'];
+        foreach ($floats as $f) {
+            if (isset($input[$f])) {
+                $clean[$f] = max(0, floatval($input[$f]));
+            }
+        }
+        
+        // Text fields
+        $texts = [
+            'message_template', 'peak_hours', 'low_hours', 'position_desktop', 'position_mobile',
+            'exclude_pages', 'include_pages', 'woodmart_style', 'woodmart_animation', 'font_family',
+            'button_label', 'button_action', 'schedule_days', 'schedule_hours'
+        ];
+        
+        foreach ($texts as $t) {
+            if (isset($input[$t])) {
+                $clean[$t] = sanitize_text_field($input[$t]);
+            }
+        }
+        
+        // Color fields
+        $colors = ['bg_color', 'text_color', 'accent_color', 'button_bg', 'button_text'];
+        foreach ($colors as $c) {
+            if (isset($input[$c])) {
+                $clean[$c] = sanitize_hex_color($input[$c]) ?: $this->defaults[$c];
+            }
+        }
+        
+        // Ensure min <= max
+        if ($clean['min_sales'] > $clean['max_sales']) {
+            $tmp = $clean['min_sales'];
+            $clean['min_sales'] = $clean['max_sales'];
+            $clean['max_sales'] = $tmp;
+        }
+        
+        return $clean;
+    }
+    
+    /**
+     * Render checkbox field
+     */
+    public function render_checkbox_field($args) {
+        $options = $this->get_options();
+        $id = $args['id'];
+        $name = $this->option_key . '[' . $id . ']';
+        $value = isset($options[$id]) ? $options[$id] : $this->defaults[$id];
+        $label = isset($args['label']) ? $args['label'] : '';
+        
+        $checked = checked($value, 1, false);
+        echo "<label><input type='checkbox' name='$name' value='1' $checked> $label</label>";
+        
+        if (isset($args['description'])) {
+            echo "<p class='description'>{$args['description']}</p>";
+        }
+    }
+    
+    /**
+     * Render text field
+     */
+    public function render_text_field($args) {
+        $options = $this->get_options();
+        $id = $args['id'];
+        $name = $this->option_key . '[' . $id . ']';
+        $value = isset($options[$id]) ? $options[$id] : $this->defaults[$id];
+        
+        echo "<input type='text' name='$name' value='" . esc_attr($value) . "' class='regular-text'>";
+        
+        if (isset($args['description'])) {
+            echo "<p class='description'>{$args['description']}</p>";
+        }
+    }
+    
+    /**
+     * Render textarea field
+     */
+    public function render_textarea_field($args) {
+        $options = $this->get_options();
+        $id = $args['id'];
+        $name = $this->option_key . '[' . $id . ']';
+        $value = isset($options[$id]) ? $options[$id] : $this->defaults[$id];
+        
+        echo "<textarea name='$name' class='large-text' rows='3'>" . esc_textarea($value) . "</textarea>";
+        
+        if (isset($args['description'])) {
+            echo "<p class='description'>{$args['description']}</p>";
+        }
+    }
+    
+    /**
+     * Render number field
+     */
+    public function render_number_field($args) {
+        $options = $this->get_options();
+        $id = $args['id'];
+        $name = $this->option_key . '[' . $id . ']';
+        $value = isset($options[$id]) ? $options[$id] : $this->defaults[$id];
+        
+        $min = isset($args['min']) ? "min='{$args['min']}'" : '';
+        $max = isset($args['max']) ? "max='{$args['max']}'" : '';
+        $step = isset($args['step']) ? "step='{$args['step']}'" : '';
+        
+        echo "<input type='number' name='$name' value='" . esc_attr($value) . "' class='regular-text' $min $max $step>";
+        
+        if (isset($args['description'])) {
+            echo "<p class='description'>{$args['description']}</p>";
+        }
+    }
+    
+    /**
+     * Render color field
+     */
+    public function render_color_field($args) {
+        $options = $this->get_options();
+        $id = $args['id'];
+        $name = $this->option_key . '[' . $id . ']';
+        $value = isset($options[$id]) ? $options[$id] : $this->defaults[$id];
+        
+        echo "<input type='text' name='$name' value='" . esc_attr($value) . "' class='fsn-color-picker'>";
+        
+        if (isset($args['description'])) {
+            echo "<p class='description'>{$args['description']}</p>";
+        }
+    }
+    
+    /**
+     * Render select field
+     */
+    public function render_select_field($args) {
+        $options = $this->get_options();
+        $id = $args['id'];
+        $name = $this->option_key . '[' . $id . ']';
+        $value = isset($options[$id]) ? $options[$id] : $this->defaults[$id];
+        $select_options = isset($args['options']) ? $args['options'] : [];
+        
+        echo "<select name='$name'>";
+        
+        foreach ($select_options as $key => $label) {
+            $selected = selected($value, $key, false);
+            echo "<option value='$key' $selected>$label</option>";
+        }
+        
+        echo "</select>";
+        
+        if (isset($args['description'])) {
+            echo "<p class='description'>{$args['description']}</p>";
+        }
+    }
+    
+    /**
+     * Enqueue assets
+     */
+    public function enqueue_assets() {
+        $o = $this->get_options();
+        
+        if (empty($o['enabled'])) return;
+        if (!$this->should_render_on_this_page($o)) return;
+        
+        // Register and enqueue styles
+        wp_register_style('fsn-style', false);
+        wp_enqueue_style('fsn-style');
+        
+        // Generate and add inline CSS
+        $css = $this->generate_css($o);
+        wp_add_inline_style('fsn-style', $css);
+        
+        // Register and enqueue scripts
+        wp_register_script('fsn-script', false, [], false, true);
+        wp_enqueue_script('fsn-script');
+        
+        // Generate and add inline JS
+        $script = $this->generate_js($o);
+        wp_add_inline_script('fsn-script', $script);
+        
+        // Add nonce for AJAX
+        wp_localize_script('fsn-script', 'fsn_ajax', [
+            'nonce' => wp_create_nonce('fsn_nonce'),
+            'ajax_url' => admin_url('admin-ajax.php')
+        ]);
+        
+        // Add container for popups
+        add_action('wp_footer', function() {
+            echo '<div id="fsn-root" aria-live="polite" aria-atomic="true"></div>';
+        });
+    }
+    
+    /**
+     * Check if notifications should be rendered on current page
+     */
+    private function should_render_on_this_page($o) {
+        // Check mobile visibility
+        if (wp_is_mobile() && !empty($o['hide_on_mobile'])) {
+            return false;
+        }
+        
+        // Check page visibility
+        $include_pages = !empty($o['include_pages']) ? array_map('trim', explode(',', $o['include_pages'])) : [];
+        $exclude_pages = !empty($o['exclude_pages']) ? array_map('trim', explode(',', $o['exclude_pages'])) : [];
+        
+        if (!empty($include_pages)) {
+            return is_page($include_pages);
+        }
+        
+        if (!empty($exclude_pages) && is_page($exclude_pages)) {
+            return false;
+        }
+        
+        // Check page type visibility
+        if (function_exists('is_product') && is_product() && empty($o['show_on_product'])) {
+            return false;
+        }
+        
+        if (function_exists('is_shop') && is_shop() && empty($o['show_on_shop'])) {
+            return false;
+        }
+        
+        if (function_exists('is_product_category') && is_product_category() && empty($o['show_on_category'])) {
+            return false;
+        }
+        
+        if ((is_front_page() || is_home()) && empty($o['show_on_home'])) {
+            return false;
+        }
+        
+        if (function_exists('is_cart') && is_cart() && empty($o['show_on_cart'])) {
+            return false;
+        }
+        
+        if (function_exists('is_checkout') && is_checkout() && empty($o['show_on_checkout'])) {
+            return false;
+        }
+        
+        // Check schedule
+        if (!empty($o['schedule_days'])) {
+            $current_day = date('N'); // 1 (Monday) to 7 (Sunday)
+            $allowed_days = array_map('trim', explode(',', $o['schedule_days']));
+            
+            if (!in_array($current_day, $allowed_days)) {
+                return false;
+            }
+        }
+        
+        if (!empty($o['schedule_hours'])) {
+            $current_hour = date('G'); // 0 to 23
+            $schedule_parts = array_map('trim', explode('-', $o['schedule_hours']));
+            
+            if (count($schedule_parts) === 2) {
+                $start_hour = intval($schedule_parts[0]);
+                $end_hour = intval($schedule_parts[1]);
+                
+                if ($start_hour <= $end_hour) {
+                    if ($current_hour < $start_hour || $current_hour > $end_hour) {
+                        return false;
+                    }
+                } else {
+                    // Crosses midnight (e.g., 22-5)
+                    if ($current_hour < $start_hour && $current_hour > $end_hour) {
+                        return false;
+                    }
+                }
+            }
+        }
+        
+        return true;
+    }
+    
+    /**
+     * WooCommerce hooks
+     */
+    public function woocommerce_hooks() {
+        $o = $this->get_options();
+        
+        if (empty($o['enabled'])) return;
+        if (!function_exists('is_product')) return;
+        
+        // Add inline notification under price
+        if (!empty($o['show_on_product'])) {
+            add_action('woocommerce_single_product_summary', function() use ($o) {
+                echo '<div class="fsn-inline" data-template="' . esc_attr($o['message_template']) . '"></div>';
+            }, 15);
+        }
+        
+        // Track conversions
+        if (!empty($o['conversion_tracking']) && !empty($o['enable_analytics'])) {
+            add_action('woocommerce_thankyou', function($order_id) use ($o) {
+                $order = wc_get_order($order_id);
+                if ($order) {
+                    // Check if this order came from a notification click
+                    $notification_product = get_post_meta($order_id, '_fsn_referral_product', true);
+                    if ($notification_product) {
+                        $this->update_stats('conversions');
+                    }
+                }
+            });
+        }
+    }
+    
+    /**
+     * Generate CSS
+     */
+    private function generate_css($o) {
+        $positions = [
+            'bottom_left' => 'bottom: 20px; left: 20px;',
+            'bottom_right' => 'bottom: 20px; right: 20px;',
+            'top_left' => 'top: 20px; left: 20px;',
+            'top_right' => 'top: 20px; right: 20px;',
+            'center_bottom' => 'bottom: 20px; left: 50%; transform: translateX(-50%);',
+            'center_top' => 'top: 20px; left: 50%; transform: translateX(-50%);'
+        ];
+        
+        $posDesktop = $positions[$o['position_desktop']] ?? $positions['bottom_right'];
+        $posMobile = $positions[$o['position_mobile']] ?? $positions['bottom_left'];
+        
+        $radius = intval($o['border_radius']);
+        $shadow = $o['shadow'] ? '0 ' . (5 * intval($o['shadow_intensity'])) . 'px ' . (15 * intval($o['shadow_intensity'])) . 'px rgba(0,0,0,0.' . (10 * intval($o['shadow_intensity'])) . ')' : 'none';
+        $font = intval($o['font_size']);
+        $mw = intval($o['max_width']);
+        $z = intval($o['z_index']);
+        $bg = $o['bg_color'];
+        $tc = $o['text_color'];
+        $accent = $o['accent_color'];
+        $btn_bg = $o['button_bg'];
+        $btn_tx = $o['button_text'];
+        $btn_radius = intval($o['button_radius']);
+        $breakpoint = intval($o['woodmart_responsive_breakpoint']);
+        $compact_scale = $o['mobile_compact'] ? floatval($o['mobile_scale']) : 1.0;
+        
+        // Animation styles
+        $animations = [
+            'fade' => 'opacity: 0; transition: opacity .3s ease;',
+            'slide' => 'transform: translateY(20px); opacity: 0; transition: transform .3s ease, opacity .3s ease;',
+            'bounce' => 'transform: scale(0.8); opacity: 0; transition: transform .3s cubic-bezier(0.68, -0.55, 0.265, 1.55), opacity .3s ease;'
+        ];
+        
+        $animation = $animations[$o['woodmart_animation']] ?? $animations['fade'];
+        
+        // Style variants
+        $styles = '';
+        if ($o['woodmart_style'] === 'classic') {
+            $styles = "
+            border: 1px solid rgba(255,255,255,0.1);
+            padding: 16px;
+            ";
+        } elseif ($o['woodmart_style'] === 'minimal') {
+            $styles = "
+            border: none;
+            padding: 10px 14px;
+            background: rgba(17,24,39,0.8);
+            backdrop-filter: blur(10px);
+            ";
+        } else {
+            // Modern style (default)
+            $styles = "
+            border: none;
+            padding: 14px 16px;
+            ";
+        }
+        
+        return "
+        #fsn-root {
+            position: fixed;
+            {$posDesktop}
+            z-index: {$z};
+            pointer-events: none;
+            max-width: 100%;
+        }
+        
+        .fsn-popup {
+            pointer-events: auto;
+            display: flex;
+            align-items: center;
+            background: {$bg};
+            color: {$tc};
+            border-radius: {$radius}px;
+            box-shadow: {$shadow};
+            max-width: {$mw}px;
+            font-size: {$font}px;
+            font-family: {$o['font_family']};
+            line-height: 1.4;
+            margin-bottom: 10px;
+            {$animation}
+            {$styles}
+        }
+        
+        .fsn-popup.fsn-show {
+            opacity: 1;
+            transform: translateY(0) scale(1);
+        }
+        
+        .fsn-avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            margin-right: 12px;
+            flex-shrink: 0;
+            background-color: rgba(255,255,255,0.1);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            color: {$accent};
+        }
+        
+        .fsn-product-image {
+            width: 50px;
+            height: 50px;
+            border-radius: 6px;
+            margin-right: 12px;
+            flex-shrink: 0;
+            object-fit: cover;
+        }
+        
+        .fsn-content {
+            flex: 1;
+            min-width: 0;
+        }
+        
+        .fsn-text {
+            margin: 0 0 4px 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        
+        .fsn-time {
+            font-size: " . ($font - 2) . "px;
+            opacity: 0.7;
+        }
+        
+        .fsn-close {
+            background: none;
+            border: none;
+            color: {$tc};
+            opacity: 0.7;
+            cursor: pointer;
+            padding: 0;
+            margin-left: 8px;
+            font-size: 16px;
+            line-height: 1;
+            width: 24px;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            flex-shrink: 0;
+            transition: background 0.2s;
+        }
+        
+        .fsn-close:hover {
+            background: rgba(255,255,255,0.1);
+            opacity: 1;
+        }
+        
+        .fsn-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 6px 12px;
+            border-radius: {$btn_radius}px;
+            text-decoration: none;
+            background: {$btn_bg};
+            color: {$btn_tx};
+            font-weight: 600;
+            font-size: " . ($font - 1) . "px;
+            white-space: nowrap;
+            margin-left: 10px;
+            flex-shrink: 0;
+            transition: opacity 0.2s, transform 0.2s;
+        }
+        
+        .fsn-btn:hover {
+            opacity: 0.9;
+            transform: translateY(-1px);
+        }
+        
+        @media (max-width: {$breakpoint}px) {
+            #fsn-root {
+                {$posMobile}
+                " . ($o['mobile_position_fixed'] ? 'position: fixed;' : '') . "
+                transform: scale({$compact_scale});
+                transform-origin: " . (strpos($posMobile, 'left') !== false ? 'left' : 'right') . " bottom;
+            }
+            
+            .fsn-popup {
+                font-size: " . max(12, $font - 1) . "px;
+                max-width: " . ($mw * 0.9) . "px;
+            }
+        }
+        
+        .fsn-inline {
+            margin: 10px 0;
+            padding: 8px 12px;
+            background: {$bg};
+            color: {$tc};
+            border-radius: {$radius}px;
+            font-size: " . max(12, $font - 1) . "px;
+            display: inline-block;
+            border-left: 3px solid {$accent};
+        }
+        ";
+    }
+    
+    /**
+     * Generate JavaScript
+     */
+    private function generate_js($o) {
+        // Get product data
+        $product_titles = [];
+        $product_images = [];
+        $product_urls = [];
+        $product_categories = [];
+        
+        if (function_exists('wc_get_products')) {
+            $args = [
+                'limit' => 20,
+                'orderby' => 'popularity',
+                'status' => 'publish'
+            ];
+            
+            $products = wc_get_products($args);
+            
+            foreach ($products as $product) {
+                $product_titles[] = wp_strip_all_tags($product->get_name());
+                $product_images[] = wp_get_attachment_image_url($product->get_image_id(), 'thumbnail');
+                $product_urls[] = get_permalink($product->get_id());
+                
+                // Get product categories
+                $categories = get_the_terms($product->get_id(), 'product_cat');
+                if ($categories && !is_wp_error($categories)) {
+                    $category_names = [];
+                    foreach ($categories as $category) {
+                        $category_names[] = $category->name;
+                    }
+                    $product_categories[] = implode(', ', $category_names);
+                } else {
+                    $product_categories[] = '';
+                }
+            }
+        }
+        
+        // Fallback data if WooCommerce is not available
+        if (empty($product_titles)) {
+            $fallback_products = [
+                ['Premium License Key', 'https://example.com/product1', 'Software'],
+                ['Professional Bundle', 'https://example.com/product2', 'Bundles'],
+                ['Creative Toolkit', 'https://example.com/product3', 'Design'],
+                ['Security Suite', 'https://example.com/product4', 'Security'],
+                ['Editor Pro', 'https://example.com/product5', 'Software']
+            ];
+            
+            foreach ($fallback_products as $product) {
+                $product_titles[] = $product[0];
+                $product_urls[] = $product[1];
+                $product_categories[] = $product[2];
+                $product_images[] = 'https://picsum.photos/seed/' . rand(1, 1000) . '/100/100.jpg';
+            }
+        }
+        
+        // Get location data
+        $locations = [
+            'New York', 'Los Angeles', 'Chicago', 'Houston', 'Phoenix',
+            'Philadelphia', 'San Antonio', 'San Diego', 'Dallas', 'San Jose',
+            'London', 'Paris', 'Berlin', 'Madrid', 'Rome',
+            'Tokyo', 'Sydney', 'Toronto', 'Dubai', 'Singapore'
+        ];
+        
+        // Get first names for avatars
+        $first_names = [
+            'Alex', 'Jordan', 'Taylor', 'Casey', 'Riley',
+            'Avery', 'Quinn', 'Morgan', 'Parker', 'Skyler',
+            'Jamie', 'Cameron', 'Rowan', 'Emerson', 'Finley'
+        ];
+        
+        // Prepare data for JavaScript
+        $data = [
+            'min' => (int)$o['min_sales'],
+            'max' => (int)$o['max_sales'],
+            'template' => $o['message_template'],
+            'interval' => max(5, (int)$o['interval_seconds']),
+            'duration' => max(3, (int)$o['duration_seconds']),
+            'initialDelay' => max(0, (int)$o['initial_delay']),
+            'behavior' => $o['behavior_pattern'],
+            'peakHours' => $o['peak_hours'],
+            'lowHours' => $o['low_hours'],
+            'weekendMultiplier' => floatval($o['weekend_multiplier']),
+            'smartFrequency' => !empty($o['smart_frequency']),
+            'sessionLimit' => max(1, (int)$o['session_limit']),
+            'conversionBoost' => max(0, (int)$o['conversion_boost']),
+            'showBtn' => !empty($o['show_button']),
+            'btnLabel' => $o['button_label'],
+            'btnAction' => $o['button_action'],
+            'showClose' => !empty($o['close_button']),
+            'showAvatar' => !empty($o['avatar']),
+            'showImage' => !empty($o['product_image']),
+            'showTime' => !empty($o['timestamp']),
+            'trackViews' => !empty($o['track_views']) && !empty($o['enable_analytics']),
+            'trackClicks' => !empty($o['track_clicks']) && !empty($o['enable_analytics']),
+            'debugMode' => !empty($o['debug_mode']),
+            'titles' => $product_titles,
+            'images' => $product_images,
+            'urls' => $product_urls,
+            'categories' => $product_categories,
+            'locations' => $locations,
+            'names' => $first_names
+        ];
+        
+        $json = wp_json_encode($data);
+        
+        return "
+        (function(){
+            var fsn = {$json};
+            var sessionCount = 0;
+            var intervalId = null;
+            var userInteracted = false;
+            var currentHour = new Date().getHours();
+            var isWeekend = [0, 6].includes(new Date().getDay());
+            
+            // Parse time ranges
+            function parseTimeRange(range) {
+                if (!range) return null;
+                var parts = range.split('-');
+                if (parts.length !== 2) return null;
+                return {
+                    start: parseInt(parts[0], 10),
+                    end: parseInt(parts[1], 10)
+                };
+            }
+            
+            var peakHours = parseTimeRange(fsn.peakHours);
+            var lowHours = parseTimeRange(fsn.lowHours);
+            
+            // Check if current hour is in range
+            function isHourInRange(hour, range) {
+                if (!range) return false;
+                if (range.start <= range.end) {
+                    return hour >= range.start && hour <= range.end;
+                } else {
+                    // Crosses midnight
+                    return hour >= range.start || hour <= range.end;
+                }
+            }
+            
+            // Calculate behavior factor
+            function getBehaviorFactor() {
+                var factor = 1.0;
+                
+                if (fsn.behavior === 'realistic') {
+                    if (isHourInRange(currentHour, peakHours)) {
+                        factor = 1.5; // Higher frequency during peak hours
+                    } else if (isHourInRange(currentHour, lowHours)) {
+                        factor = 0.5; // Lower frequency during low hours
+                    }
+                    
+                    if (isWeekend) {
+                        factor *= fsn.weekendMultiplier;
+                    }
+                } else if (fsn.behavior === 'increasing') {
+                    // Simulate increasing sales as session progresses
+                    factor = 1.0 + (sessionCount * 0.1);
+                } else if (fsn.behavior === 'decreasing') {
+                    // Simulate decreasing sales as session progresses
+                    factor = Math.max(0.5, 1.0 - (sessionCount * 0.1));
+                }
+                
+                // Apply conversion boost if user interacted
+                if (userInteracted && fsn.conversionBoost > 0) {
+                    factor *= (1.0 + fsn.conversionBoost / 100);
+                }
+                
+                return factor;
+            }
+            
+            // Calculate adjusted interval
+            function getAdjustedInterval() {
+                var baseInterval = fsn.interval;
+                var factor = getBehaviorFactor();
+                
+                // Invert factor for interval (higher factor = shorter interval)
+                return Math.max(5, Math.round(baseInterval / factor));
+            }
+            
+            // Get random integer in range
+            function randInt(min, max) {
+                min = Math.max(0, parseInt(min || 0, 10));
+                max = Math.max(min, parseInt(max || 0, 10));
+                return Math.floor(Math.random() * (max - min + 1)) + min;
+            }
+            
+            // Get random item from array
+            function pick(arr) {
+                return arr[Math.floor(Math.random() * arr.length)];
+            }
+            
+            // Get random time ago string
+            function getRandomTimeAgo() {
+                var units = [
+                    { value: 1, label: 'minute ago' },
+                    { value: 2, label: 'minutes ago' },
+                    { value: 5, label: 'minutes ago' },
+                    { value: 10, label: 'minutes ago' },
+                    { value: 15, label: 'minutes ago' },
+                    { value: 30, label: 'minutes ago' },
+                    { value: 1, label: 'hour ago' },
+                    { value: 2, label: 'hours ago' },
+                    { value: 3, label: 'hours ago' },
+                    { value: 5, label: 'hours ago' }
+                ];
+                
+                var unit = pick(units);
+                return unit.value === 1 ? '1 ' + unit.label.replace('s', '') : unit.value + ' ' + unit.label;
+            }
+            
+            // Build notification message
+            function buildMessage() {
+                var count = randInt(fsn.min, fsn.max);
+                var title = pick(fsn.titles);
+                var location = pick(fsn.locations);
+                var time = getRandomTimeAgo();
+                var name = pick(fsn.names);
+                
+                var msg = fsn.template
+                    .replace('{count}', count)
+                    .replace('{product}', title)
+                    .replace('{location}', location)
+                    .replace('{time}', time)
+                    .replace('{name}', name);
+                
+                return {
+                    count: count,
+                    title: title,
+                    location: location,
+                    time: time,
+                    name: name,
+                    text: msg
+                };
+            }
+            
+            // Track interaction
+            function trackInteraction(type, productId) {
+                if (!fsn.trackViews && !fsn.trackClicks) return;
+                
+                var data = {
+                    action: 'fsn_track',
+                    nonce: fsn_ajax.nonce,
+                    type: type
+                };
+                
+                if (productId) {
+                    data.product_id = productId;
+                }
+                
+                if (fsn.debugMode) {
+                    console.log('Tracking interaction:', data);
+                }
+                
+                jQuery.post(fsn_ajax.ajax_url, data);
+            }
+            
+            // Create popup
+            function createPopup() {
+                if (sessionCount >= fsn.sessionLimit) {
+                    if (intervalId) {
+                        clearInterval(intervalId);
+                        intervalId = null;
+                    }
+                    return;
+                }
+                
+                var m = buildMessage();
+                var root = document.getElementById('fsn-root');
+                if (!root) return;
+                
+                var productIndex = fsn.titles.indexOf(m.title);
+                var productUrl = productIndex >= 0 ? fsn.urls[productIndex] : '#';
+                var productImage = productIndex >= 0 && fsn.images[productIndex] ? fsn.images[productIndex] : '';
+                var productCategory = productIndex >= 0 ? fsn.categories[productIndex] : '';
+                
+                var wrap = document.createElement('div');
+                wrap.className = 'fsn-popup';
+                wrap.setAttribute('role', 'status');
+                
+                // Add avatar if enabled
+                if (fsn.showAvatar) {
+                    var avatar = document.createElement('div');
+                    avatar.className = 'fsn-avatar';
+                    avatar.textContent = m.name.charAt(0).toUpperCase();
+                    wrap.appendChild(avatar);
+                }
+                
+                // Add product image if enabled
+                if (fsn.showImage && productImage) {
+                    var img = document.createElement('img');
+                    img.className = 'fsn-product-image';
+                    img.src = productImage;
+                    img.alt = m.title;
+                    wrap.appendChild(img);
+                }
+                
+                // Add content
+                var content = document.createElement('div');
+                content.className = 'fsn-content';
+                
+                var text = document.createElement('div');
+                text.className = 'fsn-text';
+                text.textContent = m.text;
+                content.appendChild(text);
+                
+                if (fsn.showTime) {
+                    var time = document.createElement('div');
+                    time.className = 'fsn-time';
+                    time.textContent = m.time;
+                    content.appendChild(time);
+                }
+                
+                wrap.appendChild(content);
+                
+                // Add button if enabled
+                if (fsn.showBtn) {
+                    var btn = document.createElement('a');
+                    btn.className = 'fsn-btn';
+                    btn.textContent = fsn.btnLabel || 'View Product';
+                    
+                    if (fsn.btnAction === 'product') {
+                        btn.href = productUrl;
+                    } else if (fsn.btnAction === 'category' && productCategory) {
+                        // For simplicity, link to shop page
+                        btn.href = '" . get_permalink(wc_get_page_id('shop')) . "';
+                    } else {
+                        btn.href = productUrl;
+                    }
+                    
+                    btn.addEventListener('click', function(e) {
+                        userInteracted = true;
+                        if (fsn.trackClicks) {
+                            trackInteraction('click', productIndex >= 0 ? productIndex : 0);
+                        }
+                    });
+                    
+                    wrap.appendChild(btn);
+                }
+                
+                // Add close button if enabled
+                if (fsn.showClose) {
+                    var close = document.createElement('button');
+                    close.className = 'fsn-close';
+                    close.innerHTML = '×';
+                    close.setAttribute('aria-label', 'Close notification');
+                    close.addEventListener('click', function() {
+                        wrap.classList.remove('fsn-show');
+                        setTimeout(function() { wrap.remove(); }, 300);
+                    });
+                    wrap.appendChild(close);
+                }
+                
+                root.appendChild(wrap);
+                
+                // Track view if enabled
+                if (fsn.trackViews) {
+                    trackInteraction('view');
+                }
+                
+                // Show popup with animation
+                requestAnimationFrame(function() {
+                    wrap.classList.add('fsn-show');
+                });
+                
+                // Hide popup after duration
+                setTimeout(function() {
+                    wrap.classList.remove('fsn-show');
+                    setTimeout(function() { wrap.remove(); }, 300);
+                }, fsn.duration * 1000);
+                
+                sessionCount++;
+                
+                // Adjust interval for next popup if smart frequency is enabled
+                if (fsn.smartFrequency && intervalId) {
+                    clearInterval(intervalId);
+                    intervalId = setInterval(createPopup, getAdjustedInterval() * 1000);
+                }
+            }
+            
+            // Initialize inline notifications
+            function initInline() {
+                var nodes = document.querySelectorAll('.fsn-inline');
+                if (!nodes.length) return;
+                
+                function updateInline() {
+                    var m = buildMessage();
+                    nodes.forEach(function(n) {
+                        n.textContent = m.text;
+                    });
+                }
+                
+                updateInline();
+                setInterval(updateInline, Math.max(20, fsn.interval) * 1000);
+            }
+            
+            // Initialize popup cycle
+            function initCycle() {
+                // Start after initial delay
+                setTimeout(function() {
+                    createPopup();
+                    
+                    // Set up recurring interval
+                    intervalId = setInterval(createPopup, getAdjustedInterval() * 1000);
+                }, fsn.initialDelay * 1000);
+            }
+            
+            // Initialize when DOM is ready
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', function() {
+                    initCycle();
+                    initInline();
+                });
+            } else {
+                initCycle();
+                initInline();
+            }
+            
+            // Handle visibility change to pause/resume when tab is not visible
+            document.addEventListener('visibilitychange', function() {
+                if (document.hidden) {
+                    if (intervalId) {
+                        clearInterval(intervalId);
+                        intervalId = null;
+                    }
+                } else {
+                    if (!intervalId) {
+                        intervalId = setInterval(createPopup, getAdjustedInterval() * 1000);
+                    }
+                }
+            });
+        })();
+        ";
+    }
+}
+
+// Initialize the plugin
+new Fake_Sales_Notification();
+
+// Add AJAX handler for resetting stats
+add_action('wp_ajax_fsn_reset_stats', function() {
+    $plugin = new Fake_Sales_Notification();
+    $plugin->reset_stats();
+});
+
+// Add admin styles
+add_action('admin_head', function() {
+    ?>
+    <style>
+        .fsn-field {
+            margin: 15px 0;
+        }
+        
+        .fsn-color-picker {
+            width: 80px;
+        }
+        
+        .fsn-range-slider {
+            width: 200px;
+            vertical-align: middle;
+        }
+        
+        .fsn-range-value {
+            display: inline-block;
+            width: 40px;
+            text-align: center;
+            margin-left: 10px;
+            font-weight: bold;
+        }
+        
+        .fsn-section {
+            margin: 30px 0;
+            padding: 15px;
+            background: #f9f9f9;
+            border-radius: 5px;
+        }
+        
+        .fsn-section h2 {
+            margin-top: 0;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #ddd;
+        }
+    </style>
+    <?php
+});
