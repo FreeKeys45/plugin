@@ -1,354 +1,643 @@
-<?php
-/*
-Plugin Name: Product Reviews
-Description: Theme-proof WooCommerce review enhancements with full names (even for logged-in users), default template override, styled submission form, and dedicated admin menu.
-Author: Sabir Shah
-Version: 2.3.3
-License: GPLv2 or later
-*/
-
-if (!defined('ABSPATH')) exit;
-
-if (!class_exists('SS_Product_Reviews_Override')) {
-
-    class SS_Product_Reviews_Override {
-
-        public function __construct() {
-            add_action('plugins_loaded', [$this, 'init']);
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Report a Problem - Order Software Keys</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
         }
-
-        public function init() {
-            if (!class_exists('WooCommerce')) return;
-            $this->hooks();
+        
+        body {
+            background-color: #f5f7fa;
+            color: #333;
+            line-height: 1.6;
         }
-
-        private function hooks() {
-            add_filter('comments_open', [$this, 'force_product_comments_open'], 10, 2);
-            add_filter('woocommerce_product_tabs', [$this, 'force_default_reviews_template'], 1000);
-            add_action('woocommerce_single_product_summary', [$this, 'rating_and_cta_under_title'], 6);
-            add_action('woocommerce_shop_loop_item_title', [$this, 'rating_below_archive_title'], 11);
-
-            // Build the form in a WooCommerce-native way (works across themes)
-            add_filter('woocommerce_product_review_comment_form_args', [$this, 'woo_review_form_args'], 20);
-            // Make sure defaults are still clean if WC falls back
-            add_filter('comment_form_defaults', [$this, 'custom_review_form_fallback'], 20);
-
-            // Show Full Name + Email even for logged-in users
-            add_action('comment_form_logged_in_after', [$this, 'add_logged_in_fields']);
-
-            // Persist Full Name/Email into the comment before insert
-            add_filter('preprocess_comment', [$this, 'persist_full_name_email'], 20);
-
-            add_filter('get_comment_author', [$this, 'show_full_reviewer_name'], 10, 3);
-
-            add_action('admin_menu', [$this, 'add_product_reviews_menu']);
-            add_action('wp_enqueue_scripts', [$this, 'enqueue_front_js']);
-            add_action('wp_head', [$this, 'inject_inline_styles']);
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
         }
-
-        public function force_product_comments_open($open, $post_id) {
-            return (get_post_type($post_id) === 'product') ? true : $open;
+        
+        header {
+            background: linear-gradient(135deg, #1a6fc4, #0d4d8c);
+            color: white;
+            padding: 15px 0;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
         }
-
-        public function force_default_reviews_template($tabs) {
-            if (isset($tabs['reviews'])) {
-                $product_id = get_the_ID();
-                $product    = $product_id ? wc_get_product($product_id) : false;
-                $count      = $product ? (int) $product->get_review_count() : 0;
-
-                $tabs['reviews']['title'] = sprintf(
-                    _n('Reviews (%s)', 'Reviews (%s)', $count, 'product-reviews'),
-                    number_format_i18n($count)
-                );
-                $tabs['reviews']['callback'] = [$this, 'load_default_reviews_template'];
+        
+        .header-content {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 20px;
+        }
+        
+        .logo {
+            font-size: 24px;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+        }
+        
+        .logo i {
+            margin-right: 10px;
+            font-size: 28px;
+        }
+        
+        nav ul {
+            display: flex;
+            list-style: none;
+        }
+        
+        nav ul li {
+            margin-left: 25px;
+        }
+        
+        nav ul li a {
+            color: white;
+            text-decoration: none;
+            font-weight: 500;
+            transition: color 0.3s;
+        }
+        
+        nav ul li a:hover {
+            color: #cce5ff;
+        }
+        
+        .page-title {
+            text-align: center;
+            margin: 30px 0;
+            color: #2c3e50;
+        }
+        
+        .page-title h1 {
+            font-size: 32px;
+            margin-bottom: 10px;
+        }
+        
+        .page-title p {
+            color: #7f8c8d;
+            font-size: 16px;
+        }
+        
+        .ticket-form-container {
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.05);
+            padding: 30px;
+            margin-bottom: 40px;
+        }
+        
+        .form-row {
+            display: flex;
+            flex-wrap: wrap;
+            margin: 0 -15px;
+        }
+        
+        .form-group {
+            flex: 1;
+            min-width: 300px;
+            padding: 0 15px;
+            margin-bottom: 20px;
+        }
+        
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #2c3e50;
+        }
+        
+        .form-control {
+            width: 100%;
+            padding: 12px 15px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 16px;
+            transition: border 0.3s;
+        }
+        
+        .form-control:focus {
+            border-color: #3498db;
+            outline: none;
+            box-shadow: 0 0 0 2px rgba(52, 152, 219, 0.2);
+        }
+        
+        select.form-control {
+            appearance: none;
+            background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23333' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
+            background-repeat: no-repeat;
+            background-position: right 15px center;
+            background-size: 16px;
+            padding-right: 40px;
+        }
+        
+        textarea.form-control {
+            min-height: 120px;
+            resize: vertical;
+        }
+        
+        .upload-area {
+            border: 2px dashed #3498db;
+            border-radius: 6px;
+            padding: 30px;
+            text-align: center;
+            background-color: #f8fafc;
+            transition: all 0.3s;
+            cursor: pointer;
+        }
+        
+        .upload-area:hover {
+            background-color: #e8f4fd;
+        }
+        
+        .upload-area i {
+            font-size: 48px;
+            color: #3498db;
+            margin-bottom: 15px;
+        }
+        
+        .upload-area h3 {
+            margin-bottom: 10px;
+            color: #2c3e50;
+        }
+        
+        .upload-area p {
+            color: #7f8c8d;
+            margin-bottom: 15px;
+        }
+        
+        .btn {
+            display: inline-block;
+            background: #3498db;
+            color: white;
+            padding: 12px 25px;
+            border: none;
+            border-radius: 6px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        
+        .btn:hover {
+            background: #2980b9;
+        }
+        
+        .btn-block {
+            display: block;
+            width: 100%;
+        }
+        
+        .btn-upload {
+            background: #2ecc71;
+        }
+        
+        .btn-upload:hover {
+            background: #27ae60;
+        }
+        
+        .form-footer {
+            text-align: center;
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid #eee;
+        }
+        
+        .form-footer p {
+            color: #7f8c8d;
+        }
+        
+        .form-footer a {
+            color: #3498db;
+            text-decoration: none;
+        }
+        
+        footer {
+            background: #2c3e50;
+            color: #ecf0f1;
+            padding: 30px 0;
+            margin-top: 50px;
+        }
+        
+        .footer-content {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 20px;
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: space-between;
+        }
+        
+        .footer-section {
+            flex: 1;
+            min-width: 250px;
+            margin-bottom: 20px;
+        }
+        
+        .footer-section h3 {
+            font-size: 18px;
+            margin-bottom: 20px;
+            color: #3498db;
+        }
+        
+        .footer-section ul {
+            list-style: none;
+        }
+        
+        .footer-section ul li {
+            margin-bottom: 10px;
+        }
+        
+        .footer-section ul li a {
+            color: #bdc3c7;
+            text-decoration: none;
+            transition: color 0.3s;
+        }
+        
+        .footer-section ul li a:hover {
+            color: #3498db;
+        }
+        
+        .copyright {
+            text-align: center;
+            padding-top: 20px;
+            margin-top: 20px;
+            border-top: 1px solid #34495e;
+            color: #95a5a6;
+            font-size: 14px;
+        }
+        
+        .file-list {
+            margin-top: 15px;
+        }
+        
+        .file-item {
+            display: flex;
+            align-items: center;
+            background: #f8f9fa;
+            padding: 10px 15px;
+            border-radius: 6px;
+            margin-bottom: 10px;
+        }
+        
+        .file-item i {
+            color: #3498db;
+            margin-right: 10px;
+        }
+        
+        .file-name {
+            flex: 1;
+        }
+        
+        .file-remove {
+            color: #e74c3c;
+            cursor: pointer;
+        }
+        
+        .report-problem-btn {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: #e74c3c;
+            color: white;
+            padding: 15px 20px;
+            border-radius: 50px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-weight: 600;
+            z-index: 1000;
+            transition: all 0.3s;
+        }
+        
+        .report-problem-btn:hover {
+            background: #c0392b;
+            transform: translateY(-3px);
+            box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2);
+        }
+        
+        @media (max-width: 768px) {
+            .header-content {
+                flex-direction: column;
+                text-align: center;
             }
-            return $tabs;
-        }
-
-        public function load_default_reviews_template() {
-            if (function_exists('WC')) {
-                wc_get_template('single-product-reviews.php', [], '', WC()->plugin_path() . '/templates/');
+            
+            nav ul {
+                margin-top: 15px;
+                justify-content: center;
+            }
+            
+            nav ul li {
+                margin: 0 10px;
+            }
+            
+            .form-group {
+                min-width: 100%;
+            }
+            
+            .report-problem-btn {
+                bottom: 10px;
+                right: 10px;
+                padding: 12px 16px;
+                font-size: 14px;
             }
         }
-
-        public function rating_and_cta_under_title() {
-            if (!function_exists('is_product') || !is_product()) return;
-
-            global $product;
-            if (!$product instanceof WC_Product) return;
-
-            echo '<div class="pr-rating-cta" style="display:flex;align-items:center;gap:.75rem;flex-wrap:wrap;margin:.25rem 0 1rem;">';
-
-            if (function_exists('wc_review_ratings_enabled') && wc_review_ratings_enabled()) {
-                $rating_count = (int) $product->get_rating_count();
-                $average      = $product->get_average_rating();
-                if ($rating_count > 0) {
-                    echo wc_get_rating_html($average, $rating_count);
-                    echo '<span style="font-size:.9em;color:#555;">'
-                        . esc_html(sprintf(_n('%s review', '%s reviews', $rating_count, 'product-reviews'), number_format_i18n($rating_count)))
-                        . '</span>';
-                } else {
-                    echo '<span style="font-size:.95em;color:#555;">' . esc_html__('No reviews yet', 'product-reviews') . '</span>';
-                }
-            }
-
-            echo '<a href="#review_form" class="button pr-write-review" style="margin-left:0;">'
-                . esc_html__('Write a review', 'product-reviews')
-                . '</a>';
-
-            echo '</div>';
-        }
-
-        public function rating_below_archive_title() {
-            global $product;
-            if (!$product instanceof WC_Product) return;
-
-            if (function_exists('wc_review_ratings_enabled') && wc_review_ratings_enabled()) {
-                $rating_count = (int) $product->get_rating_count();
-                $average      = $product->get_average_rating();
-
-                echo '<div class="pr-rating-summary" style="margin:0.25rem 0 0.75rem;">';
-                if ($rating_count > 0) {
-                    echo wc_get_rating_html($average, $rating_count);
-                    echo '<span style="font-size:0.9em;color:#555;margin-left:0.5rem;">'
-                        . esc_html(sprintf(_n('%s review', '%s reviews', $rating_count, 'product-reviews'), number_format_i18n($rating_count)))
-                        . '</span>';
-                } else {
-                    echo '<span style="font-size:0.9em;color:#777;">' . esc_html__('No reviews yet', 'product-reviews') . '</span>';
-                }
-                echo '</div>';
-            }
-        }
-
-        // Preferred hook: tells WooCommerce exactly how the review form should look
-        public function woo_review_form_args($args) {
-            if (!function_exists('is_product') || !is_product()) return $args;
-
-            // Base
-            $args['title_reply']  = esc_html__('Write a Review', 'product-reviews');
-            $args['label_submit'] = esc_html__('Submit Review', 'product-reviews');
-            $args['class_form']   = isset($args['class_form'])
-                ? trim($args['class_form'] . ' pr-review-form')
-                : 'pr-review-form';
-
-            // Guest fields (WordPress hides for logged-in; we add those separately)
-            $args['fields']['author'] = '
-                <div class="pr-form-group">
-                    <label for="author">' . esc_html__('Full Name', 'product-reviews') . '</label>
-                    <input id="author" name="author" type="text" required class="pr-input" />
-                </div>';
-
-            $args['fields']['email'] = '
-                <div class="pr-form-group">
-                    <label for="email">' . esc_html__('Email', 'product-reviews') . '</label>
-                    <input id="email" name="email" type="email" required class="pr-input" />
-                </div>';
-
-            // Rating + Comment
-            $args['comment_field'] = '
-                <div class="pr-form-group">
-                    <label for="rating">' . esc_html__('Your Rating', 'product-reviews') . '</label>
-                    <select name="rating" id="rating" required class="pr-select">
-                        <option value="">' . esc_html__('Rate…', 'product-reviews') . '</option>
-                        <option value="5">★★★★★</option>
-                        <option value="4">★★★★☆</option>
-                        <option value="3">★★★☆☆</option>
-                        <option value="2">★★☆☆☆</option>
-                        <option value="1">★☆☆☆☆</option>
-                    </select>
-                </div>
-                <div class="pr-form-group">
-                    <label for="comment">' . esc_html__('Your Review', 'product-reviews') . '</label>
-                    <textarea id="comment" name="comment" rows="5" required class="pr-textarea"></textarea>
-                </div>';
-
-            // Clean up noise
-            $args['comment_notes_before'] = '';
-            $args['comment_notes_after']  = '';
-
-            return $args;
-        }
-
-        // Fallback if a theme bypasses the WC-specific filter
-        public function custom_review_form_fallback($defaults) {
-            if (!function_exists('is_product') || !is_product()) return $defaults;
-
-            $defaults['title_reply']  = esc_html__('Write a Review', 'product-reviews');
-            $defaults['label_submit'] = esc_html__('Submit Review', 'product-reviews');
-            $defaults['class_form']   = isset($defaults['class_form'])
-                ? trim($defaults['class_form'] . ' pr-review-form')
-                : 'pr-review-form';
-
-            $defaults['fields']['author'] = '
-                <div class="pr-form-group">
-                    <label for="author">' . esc_html__('Full Name', 'product-reviews') . '</label>
-                    <input id="author" name="author" type="text" required class="pr-input" />
-                </div>';
-
-            $defaults['fields']['email'] = '
-                <div class="pr-form-group">
-                    <label for="email">' . esc_html__('Email', 'product-reviews') . '</label>
-                    <input id="email" name="email" type="email" required class="pr-input" />
-                </div>';
-
-            $defaults['comment_field'] = '
-                <div class="pr-form-group">
-                    <label for="rating">' . esc_html__('Your Rating', 'product-reviews') . '</label>
-                    <select name="rating" id="rating" required class="pr-select">
-                        <option value="">' . esc_html__('Rate…', 'product-reviews') . '</option>
-                        <option value="5">★★★★★</option>
-                        <option value="4">★★★★☆</option>
-                        <option value="3">★★★☆☆</option>
-                        <option value="2">★★☆☆☆</option>
-                        <option value="1">★☆☆☆☆</option>
-                    </select>
-                </div>
-                <div class="pr-form-group">
-                    <label for="comment">' . esc_html__('Your Review', 'product-reviews') . '</label>
-                    <textarea id="comment" name="comment" rows="5" required class="pr-textarea"></textarea>
-                </div>';
-
-            return $defaults;
-        }
-
-        // Show Full Name + Email even when logged in (WordPress hides author/email by default)
-        public function add_logged_in_fields() {
-            if (!function_exists('is_product') || !is_product()) return;
-
-            $user = wp_get_current_user();
-            $full_prefill = $user && $user->exists() ? esc_attr($user->display_name) : '';
-            $email_prefill = $user && $user->exists() ? esc_attr($user->user_email) : '';
-
-            echo '
-            <div class="pr-form-group">
-                <label for="pr_full_name">' . esc_html__('Full Name', 'product-reviews') . '</label>
-                <input id="pr_full_name" name="pr_full_name" type="text" value="' . $full_prefill . '" required class="pr-input" />
+    </style>
+</head>
+<body>
+    <header>
+        <div class="header-content">
+            <div class="logo">
+                <i class="fas fa-key"></i>
+                OrderSoftwareKeys
             </div>
-            <div class="pr-form-group">
-                <label for="pr_email">' . esc_html__('Email', 'product-reviews') . '</label>
-                <input id="pr_email" name="pr_email" type="email" value="' . $email_prefill . '" required class="pr-input" />
-            </div>';
-        }
+            <nav>
+                <ul>
+                    <li><a href="#">Home</a></li>
+                    <li><a href="#">About Us</a></li>
+                    <li><a href="#">Antivirus Software</a></li>
+                    <li><a href="#">Adobe</a></li>
+                    <li><a href="#">Autodesk</a></li>
+                    <li><a href="#">PDF Editor</a></li>
+                    <li><a href="#">Contact Us</a></li>
+                </ul>
+            </nav>
+        </div>
+    </header>
 
-        // Persist the posted Full Name/Email into the comment fields prior to insert
-        public function persist_full_name_email($commentdata) {
-            // Only for product reviews
-            $post_id = isset($commentdata['comment_post_ID']) ? (int) $commentdata['comment_post_ID'] : 0;
-            if ($post_id <= 0 || get_post_type($post_id) !== 'product') {
-                return $commentdata;
-            }
+    <div class="container">
+        <div class="page-title">
+            <h1>Report a Problem</h1>
+            <p>Having issues with your software license? We're here to help.</p>
+        </div>
 
-            // Prefer explicit Full Name fields if provided
-            $full = '';
-            if (isset($_POST['author']) && $_POST['author'] !== '') {
-                $full = sanitize_text_field(wp_unslash($_POST['author']));
-            } elseif (isset($_POST['pr_full_name']) && $_POST['pr_full_name'] !== '') {
-                $full = sanitize_text_field(wp_unslash($_POST['pr_full_name']));
-            }
+        <div class="ticket-form-container">
+            <form id="ticketForm">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="orderNumber">Order Number *</label>
+                        <input type="text" id="orderNumber" class="form-control" placeholder="e.g. 7949" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="customerName">Your Name *</label>
+                        <input type="text" id="customerName" class="form-control" placeholder="Enter your full name" required>
+                    </div>
+                </div>
+                
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="customerEmail">Email Address *</label>
+                        <input type="email" id="customerEmail" class="form-control" placeholder="your.email@example.com" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="softwareProduct">Software Product *</label>
+                        <select id="softwareProduct" class="form-control" required>
+                            <option value="">Select a product</option>
+                            <option value="adobe">Adobe Creative Cloud</option>
+                            <option value="autodesk">Autodesk AutoCAD</option>
+                            <option value="msoffice">Microsoft Office</option>
+                            <option value="norton">Norton Antivirus</option>
+                            <option value="kaspersky">Kaspersky Internet Security</option>
+                            <option value="other">Other Software</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="issueCategory">Issue Category *</label>
+                        <select id="issueCategory" class="form-control" required>
+                            <option value="">Select a category</option>
+                            <option value="invalid-key">Invalid License Key</option>
+                            <option value="revoke-key">Revoke/Replace Key</option>
+                            <option value="duplicate-key">Duplicate Key</option>
+                            <option value="activation-issue">Activation Problem</option>
+                            <option value="download-issue">Download Problem</option>
+                            <option value="refund-request">Refund Request</option>
+                            <option value="other">Other Issue</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="priority">Priority Level</label>
+                        <select id="priority" class="form-control">
+                            <option value="low">Low</option>
+                            <option value="medium" selected>Medium</option>
+                            <option value="high">High</option>
+                            <option value="urgent">Urgent</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <label for="issueDescription">Problem Description *</label>
+                    <textarea id="issueDescription" class="form-control" placeholder="Please describe your issue in detail..." required></textarea>
+                </div>
+                
+                <div class="form-group">
+                    <label>Attach Files (Optional)</label>
+                    <div class="upload-area" id="uploadArea">
+                        <i class="fas fa-cloud-upload-alt"></i>
+                        <h3>Drag & Drop or Click to Upload</h3>
+                        <p>Supporting documents, screenshots, or error messages (Max: 5 files, 10MB each)</p>
+                        <button type="button" class="btn btn-upload">Select Files</button>
+                        <input type="file" id="fileInput" multiple style="display: none;">
+                    </div>
+                    <div class="file-list" id="fileList"></div>
+                </div>
+                
+                <div class="form-group">
+                    <button type="submit" class="btn btn-block">Submit Ticket</button>
+                </div>
+                
+                <div class="form-footer">
+                    <p>Need immediate assistance? Contact us at <a href="mailto:support@ordersoftwarekeys.com">support@ordersoftwarekeys.com</a></p>
+                </div>
+            </form>
+        </div>
+    </div>
 
-            $email = '';
-            if (isset($_POST['email']) && $_POST['email'] !== '') {
-                $email = sanitize_email(wp_unslash($_POST['email']));
-            } elseif (isset($_POST['pr_email']) && $_POST['pr_email'] !== '') {
-                $email = sanitize_email(wp_unslash($_POST['pr_email']));
-            }
+    <!-- Report a Problem Button -->
+    <a href="#" id="reportProblemBtn" class="report-problem-btn">
+        <i class="fas fa-exclamation-circle"></i>
+        Report a Problem
+    </a>
 
-            if ($full !== '') {
-                $commentdata['comment_author'] = $full;
-            }
-            if ($email !== '') {
-                $commentdata['comment_author_email'] = $email;
-            }
+    <footer>
+        <div class="footer-content">
+            <div class="footer-section">
+                <h3>Products</h3>
+                <ul>
+                    <li><a href="#">Antivirus Software</a></li>
+                    <li><a href="#">Adobe Products</a></li>
+                    <li><a href="#">Autodesk Software</a></li>
+                    <li><a href="#">PDF Editors</a></li>
+                    <li><a href="#">Microsoft Office</a></li>
+                </ul>
+            </div>
+            <div class="footer-section">
+                <h3>Support</h3>
+                <ul>
+                    <li><a href="#">Contact Us</a></li>
+                    <li><a href="#">FAQs</a></li>
+                    <li><a href="#">Report a Problem</a></li>
+                    <li><a href="#">Order Status</a></li>
+                    <li><a href="#">Refund Policy</a></li>
+                </ul>
+            </div>
+            <div class="footer-section">
+                <h3>Company</h3>
+                <ul>
+                    <li><a href="#">About Us</a></li>
+                    <li><a href="#">Privacy Policy</a></li>
+                    <li><a href="#">Terms of Service</a></li>
+                    <li><a href="#">Blog</a></li>
+                    <li><a href="#">Affiliate Program</a></li>
+                </ul>
+            </div>
+        </div>
+        <div class="copyright">
+            &copy; 2023 OrderSoftwareKeys.com. All rights reserved.
+        </div>
+    </footer>
 
-            return $commentdata;
-        }
-
-        // Preserve order-based full names if present; otherwise fallback
-        public function show_full_reviewer_name($author, $comment_ID, $comment = null) {
-            if (!$comment || !is_object($comment)) {
-                $comment = get_comment($comment_ID);
-            }
-            if (!$comment || is_wp_error($comment)) return $author;
-
-            // Use stored comment author's name if we set it via persist_full_name_email()
-            $stored = trim((string) $comment->comment_author);
-            if ($stored !== '') return esc_html($stored);
-
-            // Otherwise allow order-derived full names if available
-            if (!empty($comment->comment_type) && $comment->comment_type === 'review') {
-                $order_id = get_comment_meta($comment->comment_ID, 'order_id', true);
-                if ($order_id) {
-                    $first = get_post_meta((int) $order_id, '_billing_first_name', true);
-                    $last  = get_post_meta((int) $order_id, '_billing_last_name', true);
-                    $full  = trim(trim((string) $first) . ' ' . trim((string) $last));
-                    if ($full !== '') return esc_html($full);
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const uploadArea = document.getElementById('uploadArea');
+            const fileInput = document.getElementById('fileInput');
+            const fileList = document.getElementById('fileList');
+            const ticketForm = document.getElementById('ticketForm');
+            const reportProblemBtn = document.getElementById('reportProblemBtn');
+            
+            let uploadedFiles = [];
+            
+            // Report a Problem button click event
+            reportProblemBtn.addEventListener('click', function(e) {
+                e.preventDefault();
+                
+                // Generate a 6-digit random request ID
+                const requestId = Math.floor(100000 + Math.random() * 900000);
+                
+                // Redirect to the support URL with the generated request ID
+                window.location.href = `https://support.ordersoftwarekeys.com/requests/${requestId}`;
+            });
+            
+            // Upload area click event
+            uploadArea.addEventListener('click', function() {
+                fileInput.click();
+            });
+            
+            // File input change event
+            fileInput.addEventListener('change', function(e) {
+                handleFiles(e.target.files);
+            });
+            
+            // Drag and drop functionality
+            uploadArea.addEventListener('dragover', function(e) {
+                e.preventDefault();
+                uploadArea.style.backgroundColor = '#e1f0ff';
+                uploadArea.style.borderColor = '#2980b9';
+            });
+            
+            uploadArea.addEventListener('dragleave', function() {
+                uploadArea.style.backgroundColor = '#f8fafc';
+                uploadArea.style.borderColor = '#3498db';
+            });
+            
+            uploadArea.addEventListener('drop', function(e) {
+                e.preventDefault();
+                uploadArea.style.backgroundColor = '#f8fafc';
+                uploadArea.style.borderColor = '#3498db';
+                
+                if (e.dataTransfer.files.length) {
+                    handleFiles(e.dataTransfer.files);
                 }
-            }
-            return $author;
-        }
-
-        public function add_product_reviews_menu() {
-            global $wpdb;
-            $pending_reviews = 0;
-            if ($wpdb instanceof wpdb) {
-                $pending_reviews = (int) $wpdb->get_var(
-                    "SELECT COUNT(*) FROM {$wpdb->comments} WHERE comment_approved = '0' AND comment_type = 'review'"
-                );
-            }
-
-            $menu_title = esc_html__('Product Reviews', 'product-reviews');
-            if ($pending_reviews > 0) {
-                $menu_title .= sprintf(' <span class="awaiting-mod">%d</span>', $pending_reviews);
-            }
-
-            add_menu_page(
-                esc_html__('Product Reviews', 'product-reviews'),
-                $menu_title,
-                'moderate_comments',
-                'ss-product-reviews',
-                [$this, 'redirect_to_reviews_screen'],
-                'dashicons-star-filled',
-                26
-            );
-        }
-
-        public function redirect_to_reviews_screen() {
-            if (!current_user_can('moderate_comments')) {
-                wp_die(esc_html__('You do not have permission to access this page.', 'product-reviews'));
-            }
-            wp_safe_redirect(admin_url('edit-comments.php?comment_type=review'));
-            exit;
-        }
-
-        public function enqueue_front_js() {
-            if (!function_exists('is_product') || !is_product()) return;
-            $handle = 'pr-review-scroll';
-            $src    = plugin_dir_url(__FILE__) . 'assets/js/review-scroll.js';
-            wp_register_script($handle, $src, ['jquery'], '1.0.0', true);
-            wp_enqueue_script($handle);
-        }
-
-        public function inject_inline_styles() {
-            if (!function_exists('is_product') || !is_product()) return;
-
-            echo '<style>
-                .pr-review-form { max-width: 640px; margin-top: 2rem; }
-                .pr-form-group { margin-bottom: 1.25rem; }
-                .pr-form-group label { display: block; font-weight: 600; margin-bottom: 0.5rem; }
-                .pr-input, .pr-select, .pr-textarea {
-                    width: 100%;
-                    padding: 0.75rem;
-                    border: 1px solid #cfcfcf;
-                    border-radius: 4px;
-                    font-size: 1rem;
-                    background: #fff;
+            });
+            
+            // Handle selected files
+            function handleFiles(files) {
+                for (let i = 0; i < files.length; i++) {
+                    const file = files[i];
+                    
+                    // Check file size (10MB max)
+                    if (file.size > 10 * 1024 * 1024) {
+                        alert(`File "${file.name}" is too large. Maximum size is 10MB.`);
+                        continue;
+                    }
+                    
+                    // Check if we already have 5 files
+                    if (uploadedFiles.length >= 5) {
+                        alert('Maximum of 5 files allowed.');
+                        break;
+                    }
+                    
+                    uploadedFiles.push(file);
+                    displayFile(file);
                 }
-                .pr-select { height: 2.5rem; }
-                .pr-textarea { resize: vertical; min-height: 140px; }
-                .pr-rating-cta .star-rating { transform: translateY(-1px); }
-            </style>';
-        }
-    }
-
-    new SS_Product_Reviews_Override();
-}
+                
+                // Reset file input
+                fileInput.value = '';
+            }
+            
+            // Display file in the list
+            function displayFile(file) {
+                const fileItem = document.createElement('div');
+                fileItem.className = 'file-item';
+                
+                fileItem.innerHTML = `
+                    <i class="fas fa-file"></i>
+                    <div class="file-name">${file.name}</div>
+                    <div class="file-remove" data-name="${file.name}">
+                        <i class="fas fa-times"></i>
+                    </div>
+                `;
+                
+                fileList.appendChild(fileItem);
+                
+                // Add remove event
+                const removeBtn = fileItem.querySelector('.file-remove');
+                removeBtn.addEventListener('click', function() {
+                    const fileName = this.getAttribute('data-name');
+                    uploadedFiles = uploadedFiles.filter(f => f.name !== fileName);
+                    fileList.removeChild(fileItem);
+                });
+            }
+            
+            // Form submission
+            ticketForm.addEventListener('submit', function(e) {
+                e.preventDefault();
+                
+                // Basic validation
+                const orderNumber = document.getElementById('orderNumber').value;
+                const customerName = document.getElementById('customerName').value;
+                const customerEmail = document.getElementById('customerEmail').value;
+                const softwareProduct = document.getElementById('softwareProduct').value;
+                const issueCategory = document.getElementById('issueCategory').value;
+                const issueDescription = document.getElementById('issueDescription').value;
+                
+                if (!orderNumber || !customerName || !customerEmail || !softwareProduct || 
+                    !issueCategory || !issueDescription) {
+                    alert('Please fill in all required fields.');
+                    return;
+                }
+                
+                // Generate a 6-digit random request ID
+                const requestId = Math.floor(100000 + Math.random() * 900000);
+                
+                // Redirect to the support URL with the generated request ID
+                window.location.href = `https://support.ordersoftwarekeys.com/requests/${requestId}`;
+            });
+        });
+    </script>
+</body>
+</html>
