@@ -1,8 +1,8 @@
 <?php
 /**
- * Plugin Name: AVIF Image Optimizer for WoodMart
+ * Plugin Name: Bulletproof AVIF Image Optimizer
  * Description: Optimizes images by converting to AVIF with WebP and JPEG/PNG fallbacks.
- * Version: 2.0.0
+ * Version: 3.0.0
  * Author: Your Name
  */
 
@@ -12,7 +12,7 @@ if (!defined('ABSPATH')) {
 }
 
 // Define plugin constants
-define('AVIF_OPTIMIZER_VERSION', '2.0.0');
+define('AVIF_OPTIMIZER_VERSION', '3.0.0');
 define('AVIF_OPTIMIZER_PATH', plugin_dir_path(__FILE__));
 define('AVIF_OPTIMIZER_URL', plugin_dir_url(__FILE__));
 
@@ -29,13 +29,58 @@ function avif_optimizer_activate() {
             'batch_size' => 20,
             'max_execution_time' => 30,
             'enable_restore' => 1,
-            'enable_logging' => 1
+            'enable_logging' => 1,
+            'auto_optimize' => 1
         );
         update_option('avif_optimizer_settings', $default_settings);
     }
     
     // Check for Imagick/GD on activation
     avif_check_image_libraries();
+    
+    // Schedule a daily check for unoptimized images
+    if (!wp_next_scheduled('avif_daily_check')) {
+        wp_schedule_event(time(), 'daily', 'avif_daily_check');
+    }
+}
+
+// Deactivation hook
+register_deactivation_hook(__FILE__, 'avif_optimizer_deactivate');
+function avif_optimizer_deactivate() {
+    // Clear scheduled hook
+    wp_clear_scheduled_hook('avif_daily_check');
+}
+
+// Daily check for unoptimized images
+add_action('avif_daily_check', 'avif_daily_check_function');
+function avif_daily_check_function() {
+    $options = get_option('avif_optimizer_settings');
+    if (isset($options['auto_optimize']) && $options['auto_optimize']) {
+        // Find and optimize any unoptimized images
+        $args = array(
+            'post_type' => 'attachment',
+            'post_mime_type' => 'image/*',
+            'posts_per_page' => 10,
+            'meta_query' => array(
+                array(
+                    'key' => '_avif_generated',
+                    'compare' => 'NOT EXISTS'
+                )
+            )
+        );
+        
+        $query = new WP_Query($args);
+        
+        if ($query->have_posts()) {
+            while ($query->have_posts()) {
+                $query->the_post();
+                $attachment_id = get_the_ID();
+                avif_generate_alternatives($attachment_id);
+            }
+        }
+        
+        wp_reset_postdata();
+    }
 }
 
 // Check for required image libraries
@@ -97,18 +142,48 @@ function avif_codec_missing_notice() {
     echo '<div class="notice notice-warning"><p>AVIF Image Optimizer: Imagick is installed but AVIF codec is not supported. Please update your Imagick version to one that supports AVIF.</p></div>';
 }
 
-// Add admin menu
+// Add top-level admin menu
 add_action('admin_menu', 'avif_optimizer_add_admin_menu');
 add_action('admin_init', 'avif_optimizer_settings_init');
 
 function avif_optimizer_add_admin_menu() {
-    add_submenu_page(
-        'woodmart_options',  // This makes it appear under WoodMart settings
+    // Add top-level menu
+    add_menu_page(
         'AVIF Optimizer',
         'AVIF Optimizer',
         'manage_options',
         'avif-image-optimizer',
+        'avif_optimizer_settings_page',
+        'dashicons-format-image',
+        30
+    );
+    
+    // Add submenu pages
+    add_submenu_page(
+        'avif-image-optimizer',
+        'Dashboard',
+        'Dashboard',
+        'manage_options',
+        'avif-image-optimizer',
         'avif_optimizer_settings_page'
+    );
+    
+    add_submenu_page(
+        'avif-image-optimizer',
+        'Settings',
+        'Settings',
+        'manage_options',
+        'avif-image-optimizer-settings',
+        'avif_optimizer_settings_subpage'
+    );
+    
+    add_submenu_page(
+        'avif-image-optimizer',
+        'Tools',
+        'Tools',
+        'manage_options',
+        'avif-image-optimizer-tools',
+        'avif_optimizer_tools_page'
     );
 }
 
@@ -119,14 +194,14 @@ function avif_optimizer_settings_init() {
         'avif_optimizer_settings_section',
         'AVIF Optimization Settings',
         'avif_optimizer_settings_section_callback',
-        'avif-image-optimizer'
+        'avif-image-optimizer-settings'
     );
     
     add_settings_field(
         'enable_avif',
         'Enable AVIF Generation',
         'avif_checkbox_render',
-        'avif-image-optimizer',
+        'avif-image-optimizer-settings',
         'avif_optimizer_settings_section',
         array('name' => 'enable_avif')
     );
@@ -135,7 +210,7 @@ function avif_optimizer_settings_init() {
         'enable_webp',
         'Enable WebP Generation',
         'avif_checkbox_render',
-        'avif-image-optimizer',
+        'avif-image-optimizer-settings',
         'avif_optimizer_settings_section',
         array('name' => 'enable_webp')
     );
@@ -144,7 +219,7 @@ function avif_optimizer_settings_init() {
         'avif_quality',
         'AVIF Quality (%)',
         'avif_quality_render',
-        'avif-image-optimizer',
+        'avif-image-optimizer-settings',
         'avif_optimizer_settings_section',
         array('name' => 'avif_quality', 'max' => 100)
     );
@@ -153,7 +228,7 @@ function avif_optimizer_settings_init() {
         'webp_quality',
         'WebP Quality (%)',
         'avif_quality_render',
-        'avif-image-optimizer',
+        'avif-image-optimizer-settings',
         'avif_optimizer_settings_section',
         array('name' => 'webp_quality', 'max' => 100)
     );
@@ -162,7 +237,7 @@ function avif_optimizer_settings_init() {
         'batch_size',
         'Batch Size',
         'avif_batch_size_render',
-        'avif-image-optimizer',
+        'avif-image-optimizer-settings',
         'avif_optimizer_settings_section'
     );
     
@@ -170,7 +245,7 @@ function avif_optimizer_settings_init() {
         'max_execution_time',
         'Max Execution Time (seconds)',
         'avif_execution_time_render',
-        'avif-image-optimizer',
+        'avif-image-optimizer-settings',
         'avif_optimizer_settings_section'
     );
     
@@ -178,7 +253,7 @@ function avif_optimizer_settings_init() {
         'enable_restore',
         'Enable Restore Function',
         'avif_checkbox_render',
-        'avif-image-optimizer',
+        'avif-image-optimizer-settings',
         'avif_optimizer_settings_section',
         array('name' => 'enable_restore')
     );
@@ -187,9 +262,18 @@ function avif_optimizer_settings_init() {
         'enable_logging',
         'Enable Debug Logging',
         'avif_checkbox_render',
-        'avif-image-optimizer',
+        'avif-image-optimizer-settings',
         'avif_optimizer_settings_section',
         array('name' => 'enable_logging')
+    );
+    
+    add_settings_field(
+        'auto_optimize',
+        'Auto Optimize New Images',
+        'avif_checkbox_render',
+        'avif-image-optimizer-settings',
+        'avif_optimizer_settings_section',
+        array('name' => 'auto_optimize')
     );
 }
 
@@ -240,7 +324,7 @@ function avif_optimizer_settings_page() {
     
     ?>
     <div class="wrap">
-        <h1>AVIF Image Optimizer</h1>
+        <h1>AVIF Image Optimizer Dashboard</h1>
         
         <?php if (!$libraries['imagick_available'] || !$libraries['avif_supported']): ?>
         <div class="notice notice-error">
@@ -253,46 +337,63 @@ function avif_optimizer_settings_page() {
         </div>
         <?php endif; ?>
         
-        <div class="card">
-            <h2>Optimization Statistics</h2>
-            <div id="avif-stats">
-                <p>Loading statistics...</p>
-            </div>
-        </div>
-        
-        <form method="post" action="options.php">
-            <?php
-            settings_fields('avif_optimizer_settings_group');
-            do_settings_sections('avif-image-optimizer');
-            submit_button();
-            ?>
-        </form>
-        
-        <div class="card">
-            <h2>Bulk Operations</h2>
-            <p>Click the button below to start optimizing all images in your media library.</p>
-            <button id="bulk-optimize" class="button button-primary">Start Bulk Optimization</button>
-            
-            <?php if (get_option('avif_optimizer_settings')['enable_restore']): ?>
-            <p style="margin-top: 15px;">If you experience issues with optimized images, you can restore the originals:</p>
-            <button id="restore-originals" class="button">Restore Original Images</button>
-            <?php endif; ?>
-            
-            <div id="operation-progress" style="margin-top: 20px; display: none;">
-                <div class="progress-bar">
-                    <div id="progress-fill" style="width: 0%; background-color: #0073aa; height: 20px;"></div>
+        <div class="avif-dashboard">
+            <div class="avif-card">
+                <h2>Optimization Statistics</h2>
+                <div id="avif-stats">
+                    <p>Loading statistics...</p>
                 </div>
-                <p id="progress-text">Processing...</p>
             </div>
-        </div>
-        
-        <div class="card">
-            <h2>Cache & CDN Integration</h2>
-            <p>If you're using a caching plugin or CDN, you may need to purge caches after optimization:</p>
-            <button id="purge-caches" class="button">Purge All Caches</button>
-            <p id="purge-result" style="margin-top: 10px;"></p>
+            
+            <div class="avif-card">
+                <h2>Quick Actions</h2>
+                <p>Click the button below to start optimizing all images in your media library.</p>
+                <button id="bulk-optimize" class="button button-primary button-large">Start Bulk Optimization</button>
+                
+                <?php if (get_option('avif_optimizer_settings')['enable_restore']): ?>
+                <p style="margin-top: 15px;">If you experience issues with optimized images, you can restore the originals:</p>
+                <button id="restore-originals" class="button">Restore Original Images</button>
+                <?php endif; ?>
+                
+                <div id="operation-progress" style="margin-top: 20px; display: none;">
+                    <div class="progress-bar">
+                        <div id="progress-fill" style="width: 0%; background-color: #0073aa; height: 20px;"></div>
+                    </div>
+                    <p id="progress-text">Processing...</p>
+                </div>
+            </div>
+            
+            <div class="avif-card">
+                <h2>Cache & CDN Integration</h2>
+                <p>If you're using a caching plugin or CDN, you may need to purge caches after optimization:</p>
+                <button id="purge-caches" class="button">Purge All Caches</button>
+                <p id="purge-result" style="margin-top: 10px;"></p>
+            </div>
         </div>
     </div>
+    
+    <style>
+        .avif-dashboard {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-top: 20px;
+        }
+        
+        .avif-card {
+            background: #fff;
+            border: 1px solid #ccd0d4;
+            box-shadow: 0 1px 1px rgba(0,0,0,.04);
+            padding: 20px;
+        }
+        
+        .progress-bar {
+            width: 100%;
+            background-color: #f1f1f1;
+            border-radius: 4px;
+            margin-bottom: 10px;
+        }
+    </style>
     
     <script>
         jQuery(document).ready(function($) {
@@ -396,6 +497,89 @@ function avif_optimizer_settings_page() {
     <?php
 }
 
+function avif_optimizer_settings_subpage() {
+    ?>
+    <div class="wrap">
+        <h1>AVIF Optimizer Settings</h1>
+        
+        <form method="post" action="options.php">
+            <?php
+            settings_fields('avif_optimizer_settings_group');
+            do_settings_sections('avif-image-optimizer-settings');
+            submit_button();
+            ?>
+        </form>
+    </div>
+    <?php
+}
+
+function avif_optimizer_tools_page() {
+    ?>
+    <div class="wrap">
+        <h1>AVIF Optimizer Tools</h1>
+        
+        <div class="card">
+            <h2>Manual Image Optimization</h2>
+            <p>Optimize individual images by entering their IDs:</p>
+            <form id="manual-optimize-form">
+                <input type="text" id="image-ids" placeholder="Enter image IDs (comma separated)" class="regular-text">
+                <button type="button" id="manual-optimize" class="button">Optimize Selected Images</button>
+                <div id="manual-result" style="margin-top: 10px;"></div>
+            </form>
+        </div>
+        
+        <div class="card">
+            <h2>System Information</h2>
+            <div id="system-info">
+                <p>Loading system information...</p>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        jQuery(document).ready(function($) {
+            // Load system information
+            $.ajax({
+                url: ajaxurl,
+                type: 'POST',
+                data: {
+                    action: 'avif_get_system_info',
+                    _ajax_nonce: '<?php echo wp_create_nonce("avif_get_system_info_nonce"); ?>'
+                },
+                success: function(response) {
+                    $('#system-info').html(response);
+                }
+            });
+            
+            // Manual optimization
+            $('#manual-optimize').on('click', function() {
+                const imageIds = $('#image-ids').val();
+                
+                if (!imageIds) {
+                    $('#manual-result').html('<span style="color: red;">Please enter at least one image ID.</span>');
+                    return;
+                }
+                
+                $('#manual-result').html('Processing...');
+                
+                $.ajax({
+                    url: ajaxurl,
+                    type: 'POST',
+                    data: {
+                        action: 'avif_manual_optimize',
+                        image_ids: imageIds,
+                        _ajax_nonce: '<?php echo wp_create_nonce("avif_manual_optimize_nonce"); ?>'
+                    },
+                    success: function(response) {
+                        $('#manual-result').html(response.data.message);
+                    }
+                });
+            });
+        });
+    </script>
+    <?php
+}
+
 // AJAX handlers with nonce security
 add_action('wp_ajax_avif_get_stats', 'avif_get_stats');
 function avif_get_stats() {
@@ -417,14 +601,152 @@ function avif_get_stats() {
     
     ob_start();
     ?>
-    <p>Total images: <?php echo $total_images; ?></p>
-    <p>Optimized images: <?php echo $optimized_images; ?></p>
-    <p>Unoptimized images: <?php echo $unoptimized; ?></p>
-    <p>Space saved: <?php echo $space_saved_formatted; ?></p>
+    <div class="avif-stats-grid">
+        <div class="stat-item">
+            <h3><?php echo $total_images; ?></h3>
+            <p>Total Images</p>
+        </div>
+        <div class="stat-item">
+            <h3><?php echo $optimized_images; ?></h3>
+            <p>Optimized Images</p>
+        </div>
+        <div class="stat-item">
+            <h3><?php echo $unoptimized; ?></h3>
+            <p>Unoptimized Images</p>
+        </div>
+        <div class="stat-item">
+            <h3><?php echo $space_saved_formatted; ?></h3>
+            <p>Space Saved</p>
+        </div>
+    </div>
+    <style>
+        .avif-stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+        }
+        .stat-item {
+            text-align: center;
+            padding: 15px;
+            background: #f9f9f9;
+            border-radius: 4px;
+        }
+        .stat-item h3 {
+            margin: 0 0 5px 0;
+            font-size: 24px;
+            color: #0073aa;
+        }
+        .stat-item p {
+            margin: 0;
+            font-size: 14px;
+            color: #666;
+        }
+    </style>
     <?php
     $response = ob_get_clean();
     
     wp_send_json_success($response);
+}
+
+add_action('wp_ajax_avif_get_system_info', 'avif_get_system_info');
+function avif_get_system_info() {
+    // Verify nonce
+    if (!check_ajax_referer('avif_get_system_info_nonce', '_ajax_nonce', false)) {
+        wp_send_json_error('Security check failed');
+        wp_die();
+    }
+    
+    $imagick_available = extension_loaded('imagick');
+    $gd_available = extension_loaded('gd');
+    $avif_supported = false;
+    
+    if ($imagick_available) {
+        try {
+            $imagick = new Imagick();
+            $formats = $imagick->queryFormats();
+            $avif_supported = in_array('AVIF', $formats);
+        } catch (Exception $e) {
+            $avif_supported = false;
+        }
+    }
+    
+    $memory_limit = ini_get('memory_limit');
+    $max_execution_time = ini_get('max_execution_time');
+    $upload_max_filesize = ini_get('upload_max_filesize');
+    
+    ob_start();
+    ?>
+    <table class="widefat">
+        <tr>
+            <td>PHP Version</td>
+            <td><?php echo PHP_VERSION; ?></td>
+        </tr>
+        <tr>
+            <td>Imagick Extension</td>
+            <td><?php echo $imagick_available ? 'Available' : 'Not Available'; ?></td>
+        </tr>
+        <tr>
+            <td>GD Extension</td>
+            <td><?php echo $gd_available ? 'Available' : 'Not Available'; ?></td>
+        </tr>
+        <tr>
+            <td>AVIF Support</td>
+            <td><?php echo $avif_supported ? 'Supported' : 'Not Supported'; ?></td>
+        </tr>
+        <tr>
+            <td>Memory Limit</td>
+            <td><?php echo $memory_limit; ?></td>
+        </tr>
+        <tr>
+            <td>Max Execution Time</td>
+            <td><?php echo $max_execution_time; ?>s</td>
+        </tr>
+        <tr>
+            <td>Upload Max Filesize</td>
+            <td><?php echo $upload_max_filesize; ?></td>
+        </tr>
+    </table>
+    <?php
+    $response = ob_get_clean();
+    
+    wp_send_json_success($response);
+}
+
+add_action('wp_ajax_avif_manual_optimize', 'avif_manual_optimize');
+function avif_manual_optimize() {
+    // Verify nonce
+    if (!check_ajax_referer('avif_manual_optimize_nonce', '_ajax_nonce', false)) {
+        wp_send_json_error('Security check failed');
+        wp_die();
+    }
+    
+    // Check user capabilities
+    if (!current_user_can('manage_options')) {
+        wp_send_json_error('Permission denied');
+        wp_die();
+    }
+    
+    $image_ids = isset($_POST['image_ids']) ? sanitize_text_field($_POST['image_ids']) : '';
+    $ids = array_map('intval', explode(',', $image_ids));
+    $processed = 0;
+    $errors = 0;
+    
+    foreach ($ids as $id) {
+        if (wp_attachment_is_image($id)) {
+            $result = avif_generate_alternatives($id);
+            if ($result > 0) {
+                $processed++;
+            } else {
+                $errors++;
+            }
+        } else {
+            $errors++;
+        }
+    }
+    
+    $message = "Processed: $processed images. Errors: $errors.";
+    
+    wp_send_json_success(array('message' => $message));
 }
 
 add_action('wp_ajax_avif_bulk_optimize', 'avif_bulk_optimize');
@@ -655,7 +977,10 @@ function avif_process_new_attachment($attachment_id) {
         return;
     }
     
-    avif_generate_alternatives($attachment_id);
+    $options = get_option('avif_optimizer_settings');
+    if (isset($options['auto_optimize']) && $options['auto_optimize']) {
+        avif_generate_alternatives($attachment_id);
+    }
 }
 
 function avif_generate_alternatives($attachment_id) {
@@ -1109,6 +1434,39 @@ function avif_media_column_content($column_name, $attachment_id) {
     }
 }
 
+// Add bulk action to Media Library
+add_filter('bulk_actions-upload', 'avif_add_bulk_action');
+function avif_add_bulk_action($bulk_actions) {
+    $bulk_actions['avif_optimize'] = 'Optimize to AVIF/WebP';
+    return $bulk_actions;
+}
+
+add_filter('handle_bulk_actions-upload', 'avif_handle_bulk_action', 10, 3);
+function avif_handle_bulk_action($redirect_to, $doaction, $post_ids) {
+    if ($doaction !== 'avif_optimize') {
+        return $redirect_to;
+    }
+    
+    $processed = 0;
+    foreach ($post_ids as $post_id) {
+        if (wp_attachment_is_image($post_id)) {
+            avif_generate_alternatives($post_id);
+            $processed++;
+        }
+    }
+    
+    $redirect_to = add_query_arg('avif_optimized', $processed, $redirect_to);
+    return $redirect_to;
+}
+
+add_action('admin_notices', 'avif_bulk_action_admin_notice');
+function avif_bulk_action_admin_notice() {
+    if (isset($_GET['avif_optimized'])) {
+        $count = intval($_GET['avif_optimized']);
+        echo '<div id="message" class="notice notice-success is-dismissible"><p>' . $count . ' images optimized to AVIF/WebP.</p></div>';
+    }
+}
+
 // Hook into thumbnail regeneration
 add_action('regenerate_thumbnails_complete', 'avif_regenerate_thumbnails_complete');
 function avif_regenerate_thumbnails_complete($attachment_id) {
@@ -1246,121 +1604,5 @@ class AVIF_Optimizer_CLI {
         WP_CLI::line("Optimized images: $optimized_images");
         WP_CLI::line("Unoptimized images: $unoptimized");
         WP_CLI::line("Space saved: $space_saved_formatted");
-    }
-}
-
-// Multisite support
-if (is_multisite()) {
-    // Add network admin menu
-    add_action('network_admin_menu', 'avif_optimizer_network_admin_menu');
-    
-    function avif_optimizer_network_admin_menu() {
-        add_submenu_page(
-            'settings.php',
-            'AVIF Optimizer Network Settings',
-            'AVIF Optimizer',
-            'manage_network_options',
-            'avif-image-optimizer-network',
-            'avif_optimizer_network_settings_page'
-        );
-    }
-    
-    function avif_optimizer_network_settings_page() {
-        ?>
-        <div class="wrap">
-            <h1>AVIF Image Optimizer Network Settings</h1>
-            
-            <form method="post" action="edit.php?action=avif_update_network_settings">
-                <?php wp_nonce_field('avif_network_settings'); ?>
-                
-                <table class="form-table">
-                    <tr>
-                        <th scope="row">Enable Network-wide Optimization</th>
-                        <td>
-                            <input type="checkbox" name="avif_network_enable" value="1" <?php checked(get_site_option('avif_network_enable'), 1); ?>>
-                            <label>Enable AVIF optimization for all sites in the network</label>
-                        </td>
-                    </tr>
-                    
-                    <tr>
-                        <th scope="row">Default Settings for New Sites</th>
-                        <td>
-                            <p>These settings will be applied to new sites in the network:</p>
-                            
-                            <label>
-                                <input type="checkbox" name="avif_default_enable_avif" value="1" <?php checked(get_site_option('avif_default_enable_avif'), 1); ?>>
-                                Enable AVIF Generation
-                            </label>
-                            <br>
-                            
-                            <label>
-                                <input type="checkbox" name="avif_default_enable_webp" value="1" <?php checked(get_site_option('avif_default_enable_webp'), 1); ?>>
-                                Enable WebP Generation
-                            </label>
-                            <br>
-                            
-                            <label>
-                                AVIF Quality (%):
-                                <input type="number" name="avif_default_avif_quality" value="<?php echo esc_attr(get_site_option('avif_default_avif_quality', 80)); ?>" min="0" max="100">
-                            </label>
-                            <br>
-                            
-                            <label>
-                                WebP Quality (%):
-                                <input type="number" name="avif_default_webp_quality" value="<?php echo esc_attr(get_site_option('avif_default_webp_quality', 85)); ?>" min="0" max="100">
-                            </label>
-                        </td>
-                    </tr>
-                </table>
-                
-                <?php submit_button(); ?>
-            </form>
-        </div>
-        <?php
-    }
-    
-    // Handle network settings update
-    add_action('network_admin_edit_avif_update_network_settings', 'avif_update_network_settings');
-    
-    function avif_update_network_settings() {
-        check_admin_referer('avif_network_settings');
-        
-        if (isset($_POST['avif_network_enable'])) {
-            update_site_option('avif_network_enable', 1);
-        } else {
-            update_site_option('avif_network_enable', 0);
-        }
-        
-        update_site_option('avif_default_enable_avif', isset($_POST['avif_default_enable_avif']) ? 1 : 0);
-        update_site_option('avif_default_enable_webp', isset($_POST['avif_default_enable_webp']) ? 1 : 0);
-        update_site_option('avif_default_avif_quality', intval($_POST['avif_default_avif_quality']));
-        update_site_option('avif_default_webp_quality', intval($_POST['avif_default_webp_quality']));
-        
-        wp_redirect(add_query_arg(array('page' => 'avif-image-optimizer-network', 'updated' => 'true'), network_admin_url('settings.php')));
-        exit;
-    }
-    
-    // Apply default settings to new sites
-    add_action('wpmu_new_blog', 'avif_apply_default_settings', 10, 6);
-    
-    function avif_apply_default_settings($blog_id, $user_id, $domain, $path, $site_id, $meta) {
-        if (get_site_option('avif_network_enable')) {
-            switch_to_blog($blog_id);
-            
-            $default_settings = array(
-                'enable_avif' => get_site_option('avif_default_enable_avif', 1),
-                'enable_webp' => get_site_option('avif_default_enable_webp', 1),
-                'avif_quality' => get_site_option('avif_default_avif_quality', 80),
-                'webp_quality' => get_site_option('avif_default_webp_quality', 85),
-                'batch_size' => 20,
-                'max_execution_time' => 30,
-                'enable_restore' => 1,
-                'enable_logging' => 1
-            );
-            
-            update_option('avif_optimizer_settings', $default_settings);
-            
-            restore_current_blog();
-        }
     }
 }
