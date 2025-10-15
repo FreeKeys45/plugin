@@ -2,7 +2,7 @@
 /**
  * Plugin Name: AVIF Image Optimizer for WoodMart
  * Description: Optimizes images by converting to AVIF with WebP and JPEG/PNG fallbacks.
- * Version: 1.0.0
+ * Version: 2.0.0
  * Author: Your Name
  */
 
@@ -12,7 +12,7 @@ if (!defined('ABSPATH')) {
 }
 
 // Define plugin constants
-define('AVIF_OPTIMIZER_VERSION', '1.0.0');
+define('AVIF_OPTIMIZER_VERSION', '2.0.0');
 define('AVIF_OPTIMIZER_PATH', plugin_dir_path(__FILE__));
 define('AVIF_OPTIMIZER_URL', plugin_dir_url(__FILE__));
 
@@ -24,11 +24,77 @@ function avif_optimizer_activate() {
         $default_settings = array(
             'enable_avif' => 1,
             'enable_webp' => 1,
-            'compression_level' => 'balanced',
-            'batch_size' => 20
+            'avif_quality' => 80,
+            'webp_quality' => 85,
+            'batch_size' => 20,
+            'max_execution_time' => 30,
+            'enable_restore' => 1,
+            'enable_logging' => 1
         );
         update_option('avif_optimizer_settings', $default_settings);
     }
+    
+    // Check for Imagick/GD on activation
+    avif_check_image_libraries();
+}
+
+// Check for required image libraries
+function avif_check_image_libraries() {
+    $imagick_available = extension_loaded('imagick');
+    $gd_available = extension_loaded('gd');
+    $avif_supported = false;
+    
+    if ($imagick_available) {
+        try {
+            $imagick = new Imagick();
+            $formats = $imagick->queryFormats();
+            $avif_supported = in_array('AVIF', $formats);
+        } catch (Exception $e) {
+            $avif_supported = false;
+        }
+    }
+    
+    // Store results for later use
+    update_option('avif_imagick_available', $imagick_available);
+    update_option('avif_gd_available', $gd_available);
+    update_option('avif_avif_supported', $avif_supported);
+    
+    // Show admin notice if there are issues
+    if (!$imagick_available || !$gd_available) {
+        add_action('admin_notices', 'avif_library_missing_notice');
+    }
+    
+    if ($imagick_available && !$avif_supported) {
+        add_action('admin_notices', 'avif_codec_missing_notice');
+    }
+    
+    return array(
+        'imagick_available' => $imagick_available,
+        'gd_available' => $gd_available,
+        'avif_supported' => $avif_supported
+    );
+}
+
+// Admin notices for missing libraries
+function avif_library_missing_notice() {
+    $imagick_available = get_option('avif_imagick_available');
+    $gd_available = get_option('avif_gd_available');
+    
+    $message = 'AVIF Image Optimizer: ';
+    
+    if (!$imagick_available && !$gd_available) {
+        $message .= 'Both Imagick and GD extensions are missing. Please install at least one of these PHP extensions to use image optimization.';
+    } elseif (!$imagick_available) {
+        $message .= 'Imagick extension is missing. AVIF conversion will not work. Please install Imagick to enable AVIF support.';
+    } elseif (!$gd_available) {
+        $message .= 'GD extension is missing. WebP conversion may not work properly. Please install GD for better compatibility.';
+    }
+    
+    echo '<div class="notice notice-error"><p>' . $message . '</p></div>';
+}
+
+function avif_codec_missing_notice() {
+    echo '<div class="notice notice-warning"><p>AVIF Image Optimizer: Imagick is installed but AVIF codec is not supported. Please update your Imagick version to one that supports AVIF.</p></div>';
 }
 
 // Add admin menu
@@ -75,11 +141,21 @@ function avif_optimizer_settings_init() {
     );
     
     add_settings_field(
-        'compression_level',
-        'Compression Level',
-        'avif_compression_render',
+        'avif_quality',
+        'AVIF Quality (%)',
+        'avif_quality_render',
         'avif-image-optimizer',
-        'avif_optimizer_settings_section'
+        'avif_optimizer_settings_section',
+        array('name' => 'avif_quality', 'max' => 100)
+    );
+    
+    add_settings_field(
+        'webp_quality',
+        'WebP Quality (%)',
+        'avif_quality_render',
+        'avif-image-optimizer',
+        'avif_optimizer_settings_section',
+        array('name' => 'webp_quality', 'max' => 100)
     );
     
     add_settings_field(
@@ -88,6 +164,32 @@ function avif_optimizer_settings_init() {
         'avif_batch_size_render',
         'avif-image-optimizer',
         'avif_optimizer_settings_section'
+    );
+    
+    add_settings_field(
+        'max_execution_time',
+        'Max Execution Time (seconds)',
+        'avif_execution_time_render',
+        'avif-image-optimizer',
+        'avif_optimizer_settings_section'
+    );
+    
+    add_settings_field(
+        'enable_restore',
+        'Enable Restore Function',
+        'avif_checkbox_render',
+        'avif-image-optimizer',
+        'avif_optimizer_settings_section',
+        array('name' => 'enable_restore')
+    );
+    
+    add_settings_field(
+        'enable_logging',
+        'Enable Debug Logging',
+        'avif_checkbox_render',
+        'avif-image-optimizer',
+        'avif_optimizer_settings_section',
+        array('name' => 'enable_logging')
     );
 }
 
@@ -99,15 +201,14 @@ function avif_checkbox_render($args) {
     <?php
 }
 
-function avif_compression_render() {
+function avif_quality_render($args) {
     $options = get_option('avif_optimizer_settings');
-    $compression = isset($options['compression_level']) ? $options['compression_level'] : 'balanced';
+    $name = $args['name'];
+    $max = $args['max'];
+    $value = isset($options[$name]) ? $options[$name] : 80;
     ?>
-    <select name="avif_optimizer_settings[compression_level]">
-        <option value="lossless" <?php selected($compression, 'lossless'); ?>>Lossless</option>
-        <option value="balanced" <?php selected($compression, 'balanced'); ?>>Balanced</option>
-        <option value="lossy" <?php selected($compression, 'lossy'); ?>>Lossy</option>
-    </select>
+    <input type="range" name="avif_optimizer_settings[<?php echo $name; ?>]" value="<?php echo $value; ?>" min="0" max="<?php echo $max; ?>" oninput="this.nextElementSibling.textContent = this.value + '%'">
+    <span><?php echo $value; ?>%</span>
     <?php
 }
 
@@ -116,6 +217,16 @@ function avif_batch_size_render() {
     $batch_size = isset($options['batch_size']) ? $options['batch_size'] : 20;
     ?>
     <input type="number" name="avif_optimizer_settings[batch_size]" value="<?php echo $batch_size; ?>" min="5" max="100">
+    <p class="description">Number of images to process in each batch. Lower values if experiencing timeouts.</p>
+    <?php
+}
+
+function avif_execution_time_render() {
+    $options = get_option('avif_optimizer_settings');
+    $max_time = isset($options['max_execution_time']) ? $options['max_execution_time'] : 30;
+    ?>
+    <input type="number" name="avif_optimizer_settings[max_execution_time]" value="<?php echo $max_time; ?>" min="10" max="300">
+    <p class="description">Maximum time in seconds for each batch. Increase if processing large images.</p>
     <?php
 }
 
@@ -124,9 +235,23 @@ function avif_optimizer_settings_section_callback() {
 }
 
 function avif_optimizer_settings_page() {
+    // Check image libraries
+    $libraries = avif_check_image_libraries();
+    
     ?>
     <div class="wrap">
         <h1>AVIF Image Optimizer</h1>
+        
+        <?php if (!$libraries['imagick_available'] || !$libraries['avif_supported']): ?>
+        <div class="notice notice-error">
+            <p><strong>Warning:</strong> Your server configuration may limit optimization capabilities.</p>
+            <ul>
+                <li>Imagick: <?php echo $libraries['imagick_available'] ? 'Available' : 'Not Available'; ?></li>
+                <li>GD: <?php echo $libraries['gd_available'] ? 'Available' : 'Not Available'; ?></li>
+                <li>AVIF Support: <?php echo $libraries['avif_supported'] ? 'Supported' : 'Not Supported'; ?></li>
+            </ul>
+        </div>
+        <?php endif; ?>
         
         <div class="card">
             <h2>Optimization Statistics</h2>
@@ -144,15 +269,28 @@ function avif_optimizer_settings_page() {
         </form>
         
         <div class="card">
-            <h2>Bulk Optimization</h2>
+            <h2>Bulk Operations</h2>
             <p>Click the button below to start optimizing all images in your media library.</p>
             <button id="bulk-optimize" class="button button-primary">Start Bulk Optimization</button>
-            <div id="optimization-progress" style="margin-top: 20px; display: none;">
+            
+            <?php if (get_option('avif_optimizer_settings')['enable_restore']): ?>
+            <p style="margin-top: 15px;">If you experience issues with optimized images, you can restore the originals:</p>
+            <button id="restore-originals" class="button">Restore Original Images</button>
+            <?php endif; ?>
+            
+            <div id="operation-progress" style="margin-top: 20px; display: none;">
                 <div class="progress-bar">
                     <div id="progress-fill" style="width: 0%; background-color: #0073aa; height: 20px;"></div>
                 </div>
                 <p id="progress-text">Processing...</p>
             </div>
+        </div>
+        
+        <div class="card">
+            <h2>Cache & CDN Integration</h2>
+            <p>If you're using a caching plugin or CDN, you may need to purge caches after optimization:</p>
+            <button id="purge-caches" class="button">Purge All Caches</button>
+            <p id="purge-result" style="margin-top: 10px;"></p>
         </div>
     </div>
     
@@ -163,7 +301,8 @@ function avif_optimizer_settings_page() {
                 url: ajaxurl,
                 type: 'POST',
                 data: {
-                    action: 'avif_get_stats'
+                    action: 'avif_get_stats',
+                    _ajax_nonce: '<?php echo wp_create_nonce("avif_get_stats_nonce"); ?>'
                 },
                 success: function(response) {
                     $('#avif-stats').html(response);
@@ -172,8 +311,31 @@ function avif_optimizer_settings_page() {
             
             // Bulk optimization
             $('#bulk-optimize').on('click', function() {
-                $('#optimization-progress').show();
+                $('#operation-progress').show();
                 optimizeBatch(0);
+            });
+            
+            // Restore originals
+            $('#restore-originals').on('click', function() {
+                if (confirm('Are you sure you want to restore all original images? This will delete all AVIF and WebP versions.')) {
+                    $('#operation-progress').show();
+                    restoreBatch(0);
+                }
+            });
+            
+            // Purge caches
+            $('#purge-caches').on('click', function() {
+                $.ajax({
+                    url: ajaxurl,
+                    type: 'POST',
+                    data: {
+                        action: 'avif_purge_caches',
+                        _ajax_nonce: '<?php echo wp_create_nonce("avif_purge_caches_nonce"); ?>'
+                    },
+                    success: function(response) {
+                        $('#purge-result').html(response.data.message);
+                    }
+                });
             });
             
             function optimizeBatch(offset) {
@@ -182,7 +344,8 @@ function avif_optimizer_settings_page() {
                     type: 'POST',
                     data: {
                         action: 'avif_bulk_optimize',
-                        offset: offset
+                        offset: offset,
+                        _ajax_nonce: '<?php echo wp_create_nonce("avif_bulk_optimize_nonce"); ?>'
                     },
                     success: function(response) {
                         if (response.success) {
@@ -201,25 +364,63 @@ function avif_optimizer_settings_page() {
                     }
                 });
             }
+            
+            function restoreBatch(offset) {
+                $.ajax({
+                    url: ajaxurl,
+                    type: 'POST',
+                    data: {
+                        action: 'avif_restore_originals',
+                        offset: offset,
+                        _ajax_nonce: '<?php echo wp_create_nonce("avif_restore_originals_nonce"); ?>'
+                    },
+                    success: function(response) {
+                        if (response.success) {
+                            const progress = response.data.progress;
+                            $('#progress-fill').css('width', progress + '%');
+                            $('#progress-text').text(response.data.message);
+                            
+                            if (progress < 100) {
+                                restoreBatch(response.data.offset);
+                            } else {
+                                setTimeout(function() {
+                                    location.reload();
+                                }, 2000);
+                            }
+                        }
+                    }
+                });
+            }
         });
     </script>
     <?php
 }
 
-// AJAX handlers
+// AJAX handlers with nonce security
 add_action('wp_ajax_avif_get_stats', 'avif_get_stats');
 function avif_get_stats() {
+    // Verify nonce
+    if (!check_ajax_referer('avif_get_stats_nonce', '_ajax_nonce', false)) {
+        wp_send_json_error('Security check failed');
+        wp_die();
+    }
+    
     global $wpdb;
     
     $total_images = $wpdb->get_var("SELECT COUNT(*) FROM $wpdb->posts WHERE post_type = 'attachment' AND post_mime_type LIKE 'image/%'");
     $optimized_images = $wpdb->get_var("SELECT COUNT(*) FROM $wpdb->postmeta WHERE meta_key = '_avif_generated'");
     $unoptimized = $total_images - $optimized_images;
     
+    // Calculate space saved
+    $space_saved = get_option('avif_space_saved', 0);
+    $space_saved_formatted = size_format($space_saved);
+    
     ob_start();
     ?>
     <p>Total images: <?php echo $total_images; ?></p>
     <p>Optimized images: <?php echo $optimized_images; ?></p>
     <p>Unoptimized images: <?php echo $unoptimized; ?></p>
+    <p>Space saved: <?php echo $space_saved_formatted; ?></p>
     <?php
     $response = ob_get_clean();
     
@@ -228,9 +429,25 @@ function avif_get_stats() {
 
 add_action('wp_ajax_avif_bulk_optimize', 'avif_bulk_optimize');
 function avif_bulk_optimize() {
+    // Verify nonce
+    if (!check_ajax_referer('avif_bulk_optimize_nonce', '_ajax_nonce', false)) {
+        wp_send_json_error('Security check failed');
+        wp_die();
+    }
+    
+    // Check user capabilities
+    if (!current_user_can('manage_options')) {
+        wp_send_json_error('Permission denied');
+        wp_die();
+    }
+    
     $options = get_option('avif_optimizer_settings');
     $batch_size = isset($options['batch_size']) ? $options['batch_size'] : 20;
+    $max_time = isset($options['max_execution_time']) ? $options['max_execution_time'] : 30;
     $offset = isset($_POST['offset']) ? intval($_POST['offset']) : 0;
+    
+    // Set execution time limit
+    @set_time_limit($max_time);
     
     $args = array(
         'post_type' => 'attachment',
@@ -247,6 +464,7 @@ function avif_bulk_optimize() {
     
     $query = new WP_Query($args);
     $processed = 0;
+    $space_saved_batch = 0;
     
     if ($query->have_posts()) {
         while ($query->have_posts()) {
@@ -254,12 +472,17 @@ function avif_bulk_optimize() {
             $attachment_id = get_the_ID();
             
             // Generate AVIF and WebP versions
-            avif_generate_alternatives($attachment_id);
+            $space_saved = avif_generate_alternatives($attachment_id);
+            $space_saved_batch += $space_saved;
             $processed++;
         }
     }
     
     wp_reset_postdata();
+    
+    // Update space saved
+    $current_space_saved = get_option('avif_space_saved', 0);
+    update_option('avif_space_saved', $current_space_saved + $space_saved_batch);
     
     // Get total unoptimized count for progress calculation
     global $wpdb;
@@ -285,6 +508,144 @@ function avif_bulk_optimize() {
     }
 }
 
+add_action('wp_ajax_avif_restore_originals', 'avif_restore_originals');
+function avif_restore_originals() {
+    // Verify nonce
+    if (!check_ajax_referer('avif_restore_originals_nonce', '_ajax_nonce', false)) {
+        wp_send_json_error('Security check failed');
+        wp_die();
+    }
+    
+    // Check user capabilities
+    if (!current_user_can('manage_options')) {
+        wp_send_json_error('Permission denied');
+        wp_die();
+    }
+    
+    // Check if restore is enabled
+    $options = get_option('avif_optimizer_settings');
+    if (!isset($options['enable_restore']) || !$options['enable_restore']) {
+        wp_send_json_error('Restore function is disabled');
+        wp_die();
+    }
+    
+    $batch_size = isset($options['batch_size']) ? $options['batch_size'] : 20;
+    $max_time = isset($options['max_execution_time']) ? $options['max_execution_time'] : 30;
+    $offset = isset($_POST['offset']) ? intval($_POST['offset']) : 0;
+    
+    // Set execution time limit
+    @set_time_limit($max_time);
+    
+    $args = array(
+        'post_type' => 'attachment',
+        'post_mime_type' => 'image/*',
+        'posts_per_page' => $batch_size,
+        'offset' => $offset,
+        'meta_query' => array(
+            array(
+                'key' => '_avif_generated',
+                'compare' => 'EXISTS'
+            )
+        )
+    );
+    
+    $query = new WP_Query($args);
+    $processed = 0;
+    
+    if ($query->have_posts()) {
+        while ($query->have_posts()) {
+            $query->the_post();
+            $attachment_id = get_the_ID();
+            
+            // Delete AVIF and WebP versions
+            avif_delete_alternatives($attachment_id);
+            $processed++;
+        }
+    }
+    
+    wp_reset_postdata();
+    
+    // Get total optimized count for progress calculation
+    global $wpdb;
+    $total_images = $wpdb->get_var("SELECT COUNT(*) FROM $wpdb->posts WHERE post_type = 'attachment' AND post_mime_type LIKE 'image/%'");
+    $optimized_images = $wpdb->get_var("SELECT COUNT(*) FROM $wpdb->postmeta WHERE meta_key = '_avif_generated'");
+    
+    if ($processed < $batch_size) {
+        // All images processed
+        // Reset space saved
+        update_option('avif_space_saved', 0);
+        
+        wp_send_json_success(array(
+            'progress' => 100,
+            'message' => 'Restore complete!',
+            'offset' => $offset + $processed
+        ));
+    } else {
+        // More images to process
+        $progress = min(100, round((($total_images - $optimized_images) / $total_images) * 100));
+        wp_send_json_success(array(
+            'progress' => $progress,
+            'message' => "Restored " . ($total_images - $optimized_images) . " of $total_images images...",
+            'offset' => $offset + $processed
+        ));
+    }
+}
+
+add_action('wp_ajax_avif_purge_caches', 'avif_purge_caches');
+function avif_purge_caches() {
+    // Verify nonce
+    if (!check_ajax_referer('avif_purge_caches_nonce', '_ajax_nonce', false)) {
+        wp_send_json_error('Security check failed');
+        wp_die();
+    }
+    
+    // Check user capabilities
+    if (!current_user_can('manage_options')) {
+        wp_send_json_error('Permission denied');
+        wp_die();
+    }
+    
+    $purged = array();
+    
+    // Purge WP Rocket if active
+    if (function_exists('rocket_clean_domain')) {
+        rocket_clean_domain();
+        $purged[] = 'WP Rocket';
+    }
+    
+    // Purge W3 Total Cache if active
+    if (function_exists('w3tc_flush_all')) {
+        w3tc_flush_all();
+        $purged[] = 'W3 Total Cache';
+    }
+    
+    // Purge WP Super Cache if active
+    if (function_exists('wp_cache_clear_cache')) {
+        wp_cache_clear_cache();
+        $purged[] = 'WP Super Cache';
+    }
+    
+    // Purge LiteSpeed Cache if active
+    if (class_exists('LiteSpeed_Cache_API')) {
+        LiteSpeed_Cache_API::purge_all();
+        $purged[] = 'LiteSpeed Cache';
+    }
+    
+    // Purge SG Optimizer if active
+    if (class_exists('SiteGround_Optimizer\Supercacher')) {
+        SiteGround_Optimizer\Supercacher::purge_cache();
+        $purged[] = 'SG Optimizer';
+    }
+    
+    // Clear WordPress object cache
+    wp_cache_flush();
+    $purged[] = 'WordPress Object Cache';
+    
+    $message = 'Caches purged: ' . implode(', ', $purged);
+    
+    wp_send_json_success(array('message' => $message));
+}
+
 // Hook into new uploads
 add_action('add_attachment', 'avif_process_new_attachment');
 
@@ -301,12 +662,17 @@ function avif_generate_alternatives($attachment_id) {
     $options = get_option('avif_optimizer_settings');
     $enable_avif = isset($options['enable_avif']) ? $options['enable_avif'] : 1;
     $enable_webp = isset($options['enable_webp']) ? $options['enable_webp'] : 1;
-    $compression = isset($options['compression_level']) ? $options['compression_level'] : 'balanced';
+    $avif_quality = isset($options['avif_quality']) ? $options['avif_quality'] : 80;
+    $webp_quality = isset($options['webp_quality']) ? $options['webp_quality'] : 85;
+    $enable_logging = isset($options['enable_logging']) ? $options['enable_logging'] : 1;
     
     // Get attachment metadata
     $metadata = wp_get_attachment_metadata($attachment_id);
     if (!$metadata) {
-        return;
+        if ($enable_logging) {
+            error_log("AVIF Optimizer: No metadata found for attachment $attachment_id");
+        }
+        return 0;
     }
     
     // Get file path
@@ -315,17 +681,29 @@ function avif_generate_alternatives($attachment_id) {
     
     // Check if file exists
     if (!file_exists($file_path)) {
-        return;
+        if ($enable_logging) {
+            error_log("AVIF Optimizer: File not found for attachment $attachment_id: $file_path");
+        }
+        return 0;
     }
+    
+    $original_size = filesize($file_path);
+    $space_saved = 0;
     
     // Generate AVIF if enabled
     if ($enable_avif) {
-        avif_convert_to_avif($file_path, $compression);
+        $avif_size = avif_convert_to_avif($file_path, $avif_quality);
+        if ($avif_size > 0) {
+            $space_saved += ($original_size - $avif_size);
+        }
     }
     
     // Generate WebP if enabled
     if ($enable_webp) {
-        avif_convert_to_webp($file_path);
+        $webp_size = avif_convert_to_webp($file_path, $webp_quality);
+        if ($webp_size > 0) {
+            $space_saved += ($original_size - $webp_size);
+        }
     }
     
     // Process all image sizes
@@ -334,12 +712,20 @@ function avif_generate_alternatives($attachment_id) {
             $size_file = dirname($file_path) . '/' . $size_data['file'];
             
             if (file_exists($size_file)) {
+                $size_original = filesize($size_file);
+                
                 if ($enable_avif) {
-                    avif_convert_to_avif($size_file, $compression);
+                    $avif_size = avif_convert_to_avif($size_file, $avif_quality);
+                    if ($avif_size > 0) {
+                        $space_saved += ($size_original - $avif_size);
+                    }
                 }
                 
                 if ($enable_webp) {
-                    avif_convert_to_webp($size_file);
+                    $webp_size = avif_convert_to_webp($size_file, $webp_quality);
+                    if ($webp_size > 0) {
+                        $space_saved += ($size_original - $webp_size);
+                    }
                 }
             }
         }
@@ -347,55 +733,52 @@ function avif_generate_alternatives($attachment_id) {
     
     // Mark as processed
     update_post_meta($attachment_id, '_avif_generated', time());
+    
+    return $space_saved;
 }
 
-function avif_convert_to_avif($file_path, $compression = 'balanced') {
+function avif_convert_to_avif($file_path, $quality = 80) {
     // Check if Imagick is available
     if (!extension_loaded('imagick')) {
-        error_log('Imagick extension not available for AVIF conversion');
-        return false;
+        return 0;
     }
     
     try {
         $image = new Imagick($file_path);
         
-        // Set compression quality based on setting
-        switch ($compression) {
-            case 'lossless':
-                $image->setOption('avif:compression-level', 0);
-                $image->setOption('avif:lossless', 'true');
-                break;
-            case 'balanced':
-                $image->setOption('avif:compression-level', 50);
-                $image->setOption('avif:lossless', 'false');
-                break;
-            case 'lossy':
-                $image->setOption('avif:compression-level', 100);
-                $image->setOption('avif:lossless', 'false');
-                break;
-        }
-        
         // Get file info
         $path_info = pathinfo($file_path);
         $avif_path = $path_info['dirname'] . '/' . $path_info['filename'] . '.avif';
         
+        // Set quality
+        $image->setImageCompressionQuality($quality);
+        
         // Convert and save
         $image->setImageFormat('avif');
         $image->writeImage($avif_path);
+        
+        // Get file size
+        $avif_size = filesize($avif_path);
+        
         $image->clear();
         
-        return true;
+        return $avif_size;
     } catch (Exception $e) {
-        error_log('AVIF conversion error: ' . $e->getMessage());
-        return false;
+        $options = get_option('avif_optimizer_settings');
+        $enable_logging = isset($options['enable_logging']) ? $options['enable_logging'] : 1;
+        
+        if ($enable_logging) {
+            error_log('AVIF conversion error: ' . $e->getMessage());
+        }
+        
+        return 0;
     }
 }
 
-function avif_convert_to_webp($file_path) {
+function avif_convert_to_webp($file_path, $quality = 85) {
     // Check if GD is available
     if (!extension_loaded('gd')) {
-        error_log('GD extension not available for WebP conversion');
-        return false;
+        return 0;
     }
     
     try {
@@ -421,18 +804,77 @@ function avif_convert_to_webp($file_path) {
                 $image = imagecreatefromgif($file_path);
                 break;
             default:
-                return false;
+                return 0;
         }
         
         // Convert and save
-        imagewebp($image, $webp_path, 85);
+        imagewebp($image, $webp_path, $quality);
+        
+        // Get file size
+        $webp_size = filesize($webp_path);
+        
         imagedestroy($image);
         
-        return true;
+        return $webp_size;
     } catch (Exception $e) {
-        error_log('WebP conversion error: ' . $e->getMessage());
-        return false;
+        $options = get_option('avif_optimizer_settings');
+        $enable_logging = isset($options['enable_logging']) ? $options['enable_logging'] : 1;
+        
+        if ($enable_logging) {
+            error_log('WebP conversion error: ' . $e->getMessage());
+        }
+        
+        return 0;
     }
+}
+
+function avif_delete_alternatives($attachment_id) {
+    // Get attachment metadata
+    $metadata = wp_get_attachment_metadata($attachment_id);
+    if (!$metadata) {
+        return;
+    }
+    
+    // Get file path
+    $upload_dir = wp_upload_dir();
+    $file_path = $upload_dir['basedir'] . '/' . $metadata['file'];
+    
+    // Get file info
+    $path_info = pathinfo($file_path);
+    
+    // Delete AVIF and WebP versions of the main file
+    $avif_path = $path_info['dirname'] . '/' . $path_info['filename'] . '.avif';
+    $webp_path = $path_info['dirname'] . '/' . $path_info['filename'] . '.webp';
+    
+    if (file_exists($avif_path)) {
+        unlink($avif_path);
+    }
+    
+    if (file_exists($webp_path)) {
+        unlink($webp_path);
+    }
+    
+    // Delete AVIF and WebP versions of all image sizes
+    if (isset($metadata['sizes']) && is_array($metadata['sizes'])) {
+        foreach ($metadata['sizes'] as $size => $size_data) {
+            $size_file = dirname($file_path) . '/' . $size_data['file'];
+            $size_path_info = pathinfo($size_file);
+            
+            $size_avif_path = $size_path_info['dirname'] . '/' . $size_path_info['filename'] . '.avif';
+            $size_webp_path = $size_path_info['dirname'] . '/' . $size_path_info['filename'] . '.webp';
+            
+            if (file_exists($size_avif_path)) {
+                unlink($size_avif_path);
+            }
+            
+            if (file_exists($size_webp_path)) {
+                unlink($size_webp_path);
+            }
+        }
+    }
+    
+    // Remove the optimization marker
+    delete_post_meta($attachment_id, '_avif_generated');
 }
 
 // Filter image output to use picture tags
@@ -476,8 +918,8 @@ function avif_modify_image_attributes($attr, $attachment, $size) {
     $path_info = pathinfo($file_path);
     
     // Create AVIF and WebP URLs
-    $avif_url = $upload_dir['baseurl'] . '/' . $path_info['dirname'] . '/' . $path_info['filename'] . '.avif';
-    $webp_url = $upload_dir['baseurl'] . '/' . $path_info['dirname'] . '/' . $path_info['filename'] . '.webp';
+    $avif_url = $upload_dir['baseurl'] . '/' . str_replace($upload_dir['basedir'] . '/', '', $path_info['dirname']) . '/' . $path_info['filename'] . '.avif';
+    $webp_url = $upload_dir['baseurl'] . '/' . str_replace($upload_dir['basedir'] . '/', '', $path_info['dirname']) . '/' . $path_info['filename'] . '.webp';
     
     // Check if files exist
     $avif_exists = file_exists($path_info['dirname'] . '/' . $path_info['filename'] . '.avif');
@@ -526,8 +968,8 @@ function avif_modify_thumbnail_html($html, $post_id, $post_thumbnail_id, $size, 
     $path_info = pathinfo($file_path);
     
     // Create AVIF and WebP URLs
-    $avif_url = $upload_dir['baseurl'] . '/' . $path_info['dirname'] . '/' . $path_info['filename'] . '.avif';
-    $webp_url = $upload_dir['baseurl'] . '/' . $path_info['dirname'] . '/' . $path_info['filename'] . '.webp';
+    $avif_url = $upload_dir['baseurl'] . '/' . str_replace($upload_dir['basedir'] . '/', '', $path_info['dirname']) . '/' . $path_info['filename'] . '.avif';
+    $webp_url = $upload_dir['baseurl'] . '/' . str_replace($upload_dir['basedir'] . '/', '', $path_info['dirname']) . '/' . $path_info['filename'] . '.webp';
     
     // Check if files exist
     $avif_exists = file_exists($path_info['dirname'] . '/' . $path_info['filename'] . '.avif');
@@ -645,4 +1087,280 @@ function avif_add_frontend_script() {
     });
     </script>
     <?php
+}
+
+// Add column to Media Library to show optimization status
+add_filter('manage_media_columns', 'avif_add_media_column');
+function avif_add_media_column($columns) {
+    $columns['avif_status'] = 'AVIF Status';
+    return $columns;
+}
+
+add_action('manage_media_custom_column', 'avif_media_column_content', 10, 2);
+function avif_media_column_content($column_name, $attachment_id) {
+    if ($column_name === 'avif_status') {
+        $avif_generated = get_post_meta($attachment_id, '_avif_generated', true);
+        
+        if ($avif_generated) {
+            echo '<span style="color: #46b450;">✓ Optimized</span>';
+        } else {
+            echo '<span style="color: #dc3232;">✗ Not Optimized</span>';
+        }
+    }
+}
+
+// Hook into thumbnail regeneration
+add_action('regenerate_thumbnails_complete', 'avif_regenerate_thumbnails_complete');
+function avif_regenerate_thumbnails_complete($attachment_id) {
+    // Re-optimize after thumbnail regeneration
+    avif_generate_alternatives($attachment_id);
+}
+
+// WP-CLI support
+if (defined('WP_CLI') && WP_CLI) {
+    WP_CLI::add_command('avif', 'AVIF_Optimizer_CLI');
+}
+
+class AVIF_Optimizer_CLI {
+    /**
+     * Optimize all images in the media library.
+     *
+     * ## EXAMPLES
+     *
+     *     wp avif optimize
+     *     wp avif optimize --batch-size=50
+     *
+     * @synopsis [--batch-size=<batch-size>]
+     */
+    public function optimize($args, $assoc_args) {
+        $options = get_option('avif_optimizer_settings');
+        $batch_size = isset($assoc_args['batch-size']) ? intval($assoc_args['batch-size']) : $options['batch_size'];
+        
+        $args = array(
+            'post_type' => 'attachment',
+            'post_mime_type' => 'image/*',
+            'posts_per_page' => -1,
+            'meta_query' => array(
+                array(
+                    'key' => '_avif_generated',
+                    'compare' => 'NOT EXISTS'
+                )
+            )
+        );
+        
+        $query = new WP_Query($args);
+        $total = $query->found_posts;
+        $processed = 0;
+        
+        WP_CLI::line("Found $total images to optimize.");
+        
+        $progress = \WP_CLI\Utils\make_progress_bar('Optimizing images', $total);
+        
+        if ($query->have_posts()) {
+            while ($query->have_posts()) {
+                $query->the_post();
+                $attachment_id = get_the_ID();
+                
+                avif_generate_alternatives($attachment_id);
+                $processed++;
+                
+                $progress->tick();
+            }
+        }
+        
+        wp_reset_postdata();
+        $progress->finish();
+        
+        WP_CLI::success("Optimized $processed images.");
+    }
+    
+    /**
+     * Restore all original images.
+     *
+     * ## EXAMPLES
+     *
+     *     wp avif restore
+     *
+     */
+    public function restore($args, $assoc_args) {
+        $args = array(
+            'post_type' => 'attachment',
+            'post_mime_type' => 'image/*',
+            'posts_per_page' => -1,
+            'meta_query' => array(
+                array(
+                    'key' => '_avif_generated',
+                    'compare' => 'EXISTS'
+                )
+            )
+        );
+        
+        $query = new WP_Query($args);
+        $total = $query->found_posts;
+        $processed = 0;
+        
+        WP_CLI::line("Found $total optimized images to restore.");
+        
+        $progress = \WP_CLI\Utils\make_progress_bar('Restoring images', $total);
+        
+        if ($query->have_posts()) {
+            while ($query->have_posts()) {
+                $query->the_post();
+                $attachment_id = get_the_ID();
+                
+                avif_delete_alternatives($attachment_id);
+                $processed++;
+                
+                $progress->tick();
+            }
+        }
+        
+        wp_reset_postdata();
+        $progress->finish();
+        
+        // Reset space saved
+        update_option('avif_space_saved', 0);
+        
+        WP_CLI::success("Restored $processed images.");
+    }
+    
+    /**
+     * Show optimization statistics.
+     *
+     * ## EXAMPLES
+     *
+     *     wp avif stats
+     *
+     */
+    public function stats($args, $assoc_args) {
+        global $wpdb;
+        
+        $total_images = $wpdb->get_var("SELECT COUNT(*) FROM $wpdb->posts WHERE post_type = 'attachment' AND post_mime_type LIKE 'image/%'");
+        $optimized_images = $wpdb->get_var("SELECT COUNT(*) FROM $wpdb->postmeta WHERE meta_key = '_avif_generated'");
+        $unoptimized = $total_images - $optimized_images;
+        
+        $space_saved = get_option('avif_space_saved', 0);
+        $space_saved_formatted = size_format($space_saved);
+        
+        WP_CLI::line("Total images: $total_images");
+        WP_CLI::line("Optimized images: $optimized_images");
+        WP_CLI::line("Unoptimized images: $unoptimized");
+        WP_CLI::line("Space saved: $space_saved_formatted");
+    }
+}
+
+// Multisite support
+if (is_multisite()) {
+    // Add network admin menu
+    add_action('network_admin_menu', 'avif_optimizer_network_admin_menu');
+    
+    function avif_optimizer_network_admin_menu() {
+        add_submenu_page(
+            'settings.php',
+            'AVIF Optimizer Network Settings',
+            'AVIF Optimizer',
+            'manage_network_options',
+            'avif-image-optimizer-network',
+            'avif_optimizer_network_settings_page'
+        );
+    }
+    
+    function avif_optimizer_network_settings_page() {
+        ?>
+        <div class="wrap">
+            <h1>AVIF Image Optimizer Network Settings</h1>
+            
+            <form method="post" action="edit.php?action=avif_update_network_settings">
+                <?php wp_nonce_field('avif_network_settings'); ?>
+                
+                <table class="form-table">
+                    <tr>
+                        <th scope="row">Enable Network-wide Optimization</th>
+                        <td>
+                            <input type="checkbox" name="avif_network_enable" value="1" <?php checked(get_site_option('avif_network_enable'), 1); ?>>
+                            <label>Enable AVIF optimization for all sites in the network</label>
+                        </td>
+                    </tr>
+                    
+                    <tr>
+                        <th scope="row">Default Settings for New Sites</th>
+                        <td>
+                            <p>These settings will be applied to new sites in the network:</p>
+                            
+                            <label>
+                                <input type="checkbox" name="avif_default_enable_avif" value="1" <?php checked(get_site_option('avif_default_enable_avif'), 1); ?>>
+                                Enable AVIF Generation
+                            </label>
+                            <br>
+                            
+                            <label>
+                                <input type="checkbox" name="avif_default_enable_webp" value="1" <?php checked(get_site_option('avif_default_enable_webp'), 1); ?>>
+                                Enable WebP Generation
+                            </label>
+                            <br>
+                            
+                            <label>
+                                AVIF Quality (%):
+                                <input type="number" name="avif_default_avif_quality" value="<?php echo esc_attr(get_site_option('avif_default_avif_quality', 80)); ?>" min="0" max="100">
+                            </label>
+                            <br>
+                            
+                            <label>
+                                WebP Quality (%):
+                                <input type="number" name="avif_default_webp_quality" value="<?php echo esc_attr(get_site_option('avif_default_webp_quality', 85)); ?>" min="0" max="100">
+                            </label>
+                        </td>
+                    </tr>
+                </table>
+                
+                <?php submit_button(); ?>
+            </form>
+        </div>
+        <?php
+    }
+    
+    // Handle network settings update
+    add_action('network_admin_edit_avif_update_network_settings', 'avif_update_network_settings');
+    
+    function avif_update_network_settings() {
+        check_admin_referer('avif_network_settings');
+        
+        if (isset($_POST['avif_network_enable'])) {
+            update_site_option('avif_network_enable', 1);
+        } else {
+            update_site_option('avif_network_enable', 0);
+        }
+        
+        update_site_option('avif_default_enable_avif', isset($_POST['avif_default_enable_avif']) ? 1 : 0);
+        update_site_option('avif_default_enable_webp', isset($_POST['avif_default_enable_webp']) ? 1 : 0);
+        update_site_option('avif_default_avif_quality', intval($_POST['avif_default_avif_quality']));
+        update_site_option('avif_default_webp_quality', intval($_POST['avif_default_webp_quality']));
+        
+        wp_redirect(add_query_arg(array('page' => 'avif-image-optimizer-network', 'updated' => 'true'), network_admin_url('settings.php')));
+        exit;
+    }
+    
+    // Apply default settings to new sites
+    add_action('wpmu_new_blog', 'avif_apply_default_settings', 10, 6);
+    
+    function avif_apply_default_settings($blog_id, $user_id, $domain, $path, $site_id, $meta) {
+        if (get_site_option('avif_network_enable')) {
+            switch_to_blog($blog_id);
+            
+            $default_settings = array(
+                'enable_avif' => get_site_option('avif_default_enable_avif', 1),
+                'enable_webp' => get_site_option('avif_default_enable_webp', 1),
+                'avif_quality' => get_site_option('avif_default_avif_quality', 80),
+                'webp_quality' => get_site_option('avif_default_webp_quality', 85),
+                'batch_size' => 20,
+                'max_execution_time' => 30,
+                'enable_restore' => 1,
+                'enable_logging' => 1
+            );
+            
+            update_option('avif_optimizer_settings', $default_settings);
+            
+            restore_current_blog();
+        }
+    }
 }
