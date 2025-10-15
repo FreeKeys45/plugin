@@ -1,13 +1,9 @@
-
 <?php
 /**
- * Plugin Name: Professional Support System
- * Plugin URI: https://yourwebsite.com
- * Description: Advanced customer support system with license key management
- * Version: 5.0.1
- * Author: Your Company
- * Text Domain: pro-support
- * Requires PHP: 7.4
+ * Plugin Name: AVIF Image Optimizer for WoodMart
+ * Description: Optimizes images by converting to AVIF with WebP and JPEG/PNG fallbacks.
+ * Version: 1.0.0
+ * Author: Your Name
  */
 
 // Prevent direct access
@@ -15,719 +11,638 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-// Check if WooCommerce is active
-register_activation_hook(__FILE__, 'pro_support_check_woocommerce_active');
-function pro_support_check_woocommerce_active() {
-    if (!class_exists('WooCommerce')) {
-        deactivate_plugins(plugin_basename(__FILE__));
-        wp_die('Professional Support System requires WooCommerce to be installed and active.');
-    }
-}
-
-class ProfessionalSupportSystem {
-   
-    private static $instance = null;
-   
-    public static function get_instance() {
-        if (self::$instance === null) {
-            self::$instance = new self();
-        }
-        return self::$instance;
-    }
-   
-    public function __construct() {
-        add_action('init', array($this, 'init'));
-        register_activation_hook(__FILE__, array($this, 'activate'));
-        register_deactivation_hook(__FILE__, array($this, 'deactivate'));
-    }
-   
-    public function init() {
-        $this->init_hooks();
-        $this->add_roles();
-        $this->add_endpoints();
-       
-        add_rewrite_rule('^support/ticket/([0-9]+)/?$', 'index.php?pro_support_page=view-ticket&ticket_id=$matches[1]', 'top');
-        add_rewrite_rule('^support/dashboard/?$', 'index.php?pro_support_page=dashboard', 'top');
-        add_rewrite_tag('%pro_support_page%', '([^&]+)');
-        add_rewrite_tag('%ticket_id%', '([0-9]+)');
-    }
-   
-    private function init_hooks() {
-        add_action('wp_enqueue_scripts', array($this, 'enqueue_scripts'));
-        add_shortcode('support_dashboard', array($this, 'dashboard_shortcode'));
-        add_shortcode('support_ticket_form', array($this, 'ticket_form_shortcode'));
-       
-        // WooCommerce integration
-        add_action('woocommerce_order_details_after_order_table', array($this, 'add_report_problem_section'));
-        add_action('woocommerce_account_menu_items', array($this, 'add_support_menu_item'));
-        add_action('woocommerce_account_support-tickets_endpoint', array($this, 'support_tickets_endpoint'));
-       
-        // Template handling
-        add_action('template_redirect', array($this, 'handle_template_redirect'));
-       
-        // AJAX handlers
-        add_action('wp_ajax_pro_support_submit_ticket', array($this, 'ajax_submit_ticket'));
-        add_action('wp_ajax_nopriv_pro_support_submit_ticket', array($this, 'ajax_submit_ticket'));
-        add_action('wp_ajax_pro_support_get_license_keys', array($this, 'ajax_get_license_keys'));
-    }
-   
-    public function activate() {
-        $this->add_roles();
-        $this->add_endpoints();
-        flush_rewrite_rules();
-    }
-   
-    public function deactivate() {
-        flush_rewrite_rules();
-    }
-   
-    private function add_roles() {
-        if (!get_role('support_agent')) {
-            add_role('support_agent', 'Support Agent', array(
-                'read' => true,
-                'edit_posts' => true,
-                'upload_files' => true,
-            ));
-        }
-    }
-   
-    private function add_endpoints() {
-        add_rewrite_endpoint('support-tickets', EP_PAGES);
-    }
-   
-    public function enqueue_scripts() {
-        if (is_page('support-dashboard') || is_page('report-a-problem') || get_query_var('pro_support_page') || is_account_page()) {
-           
-            wp_enqueue_script('jquery');
-           
-            // Enqueue CSS
-            wp_register_style('pro-support-css', false);
-            wp_enqueue_style('pro-support-css');
-            wp_add_inline_style('pro-support-css', $this->get_frontend_css());
-           
-            // Enqueue JavaScript
-            wp_register_script('pro-support-js', false, array('jquery'), '1.0', true);
-            wp_enqueue_script('pro-support-js');
-            wp_add_inline_script('pro-support-js', $this->get_frontend_js());
-           
-            // Localize script
-            wp_localize_script('pro-support-js', 'pro_support', array(
-                'ajax_url' => admin_url('admin-ajax.php'),
-                'nonce' => wp_create_nonce('pro_support_nonce'),
-                'strings' => array(
-                    'loading' => 'Loading...',
-                    'error' => 'An error occurred. Please try again.',
-                    'success' => 'Success!',
-                    'select_license' => 'Select License Key',
-                    'no_license_found' => 'No license keys found for this order'
-                )
-            ));
-        }
-    }
-   
-    private function get_frontend_css() {
-        return "
-        .pro-support-container {
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 20px;
-        }
-
-        .pro-support-card {
-            background: #fff;
-            border-radius: 8px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-            padding: 30px;
-            margin-bottom: 30px;
-        }
-
-        .pro-support-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 30px;
-        }
-
-        .pro-support-title {
-            font-size: 28px;
-            font-weight: 700;
-            color: #2d3748;
-            margin: 0;
-        }
-
-        .pro-support-btn {
-            background: #3b82f6;
-            color: white;
-            padding: 12px 24px;
-            border: none;
-            border-radius: 6px;
-            font-size: 16px;
-            font-weight: 600;
-            cursor: pointer;
-            text-decoration: none;
-            display: inline-block;
-        }
-
-        .pro-support-btn:hover {
-            background: #2563eb;
-            color: white;
-        }
-
-        .pro-support-btn-report {
-            background: #ef4444;
-        }
-
-        .pro-support-btn-report:hover {
-            background: #dc2626;
-        }
-
-        .pro-support-btn-block {
-            display: block;
-            width: 100%;
-            text-align: center;
-        }
-
-        .pro-support-form-group {
-            margin-bottom: 20px;
-        }
-
-        .pro-support-form-group label {
-            display: block;
-            margin-bottom: 8px;
-            font-weight: 600;
-            color: #2d3748;
-        }
-
-        .pro-support-form-control {
-            width: 100%;
-            padding: 12px;
-            border: 1px solid #d1d5db;
-            border-radius: 6px;
-            font-size: 16px;
-        }
-
-        .pro-support-stats {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 20px;
-            margin-bottom: 30px;
-        }
-
-        .pro-support-stat-card {
-            background: #3b82f6;
-            color: white;
-            padding: 20px;
-            border-radius: 8px;
-            text-align: center;
-        }
-
-        .pro-support-stat-number {
-            font-size: 2em;
-            font-weight: bold;
-            display: block;
-        }
-
-        .pro-support-ticket-list {
-            background: #fff;
-            border-radius: 8px;
-            overflow: hidden;
-        }
-
-        .pro-support-ticket-item {
-            padding: 20px;
-            border-bottom: 1px solid #e5e7eb;
-            display: flex;
-            align-items: center;
-        }
-
-        .pro-support-ticket-number {
-            font-weight: 700;
-            color: #3b82f6;
-            min-width: 120px;
-        }
-
-        .pro-support-ticket-subject {
-            flex: 1;
-            font-weight: 600;
-        }
-
-        .pro-support-status {
-            padding: 4px 12px;
-            border-radius: 20px;
-            font-size: 12px;
-            font-weight: 600;
-            margin-right: 10px;
-        }
-
-        .pro-support-status-open { background: #dbeafe; color: #1e40af; }
-        .pro-support-status-pending { background: #fef3c7; color: #92400e; }
-        .pro-support-status-resolved { background: #d1fae5; color: #065f46; }
-
-        .pro-support-alert {
-            padding: 15px;
-            border-radius: 6px;
-            margin-bottom: 20px;
-        }
-
-        .pro-support-alert-success {
-            background: #d1fae5;
-            color: #065f46;
-            border: 1px solid #a7f3d0;
-        }
-
-        .pro-support-alert-error {
-            background: #fecaca;
-            color: #dc2626;
-            border: 1px solid #fca5a5;
-        }
-
-        .pro-support-loading {
-            display: inline-block;
-            width: 20px;
-            height: 20px;
-            border: 3px solid #f3f4f6;
-            border-top: 3px solid #3b82f6;
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-        }
-
-        .pro-support-license-box {
-            background: #f8fafc;
-            border: 1px solid #cbd5e0;
-            border-radius: 6px;
-            padding: 20px;
-            margin-bottom: 20px;
-        }
-
-        .pro-support-order-info {
-            background: #e3f2fd;
-            border-radius: 6px;
-            padding: 20px;
-            margin-bottom: 20px;
-        }
-
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-        ";
-    }
-   
-    private function get_frontend_js() {
-        return "
-        jQuery(document).ready(function($) {
-            // Initialize license key dropdown
-            $('#pro-support-order-id').on('change', function() {
-                var orderId = $(this).val();
-                var licenseSelect = $('#pro-support-license-key');
-               
-                if (!orderId) {
-                    licenseSelect.html('<option value=\"\">' + pro_support.strings.select_license + '</option>');
-                    return;
-                }
-               
-                licenseSelect.html('<option value=\"\">Loading...</option>');
-               
-                $.ajax({
-                    url: pro_support.ajax_url,
-                    type: 'POST',
-                    data: {
-                        action: 'pro_support_get_license_keys',
-                        nonce: pro_support.nonce,
-                        order_id: orderId
-                    },
-                    success: function(response) {
-                        if (response.success && response.data.length > 0) {
-                            var options = '<option value=\"\">' + pro_support.strings.select_license + '</option>';
-                            $.each(response.data, function(index, license) {
-                                options += '<option value=\"' + license.key + '\" data-product=\"' + license.product_name + '\">' + 
-                                           license.product_name + ' - ' + license.key + '</option>';
-                            });
-                            licenseSelect.html(options);
-                           
-                            licenseSelect.on('change', function() {
-                                var selectedOption = $(this).find('option:selected');
-                                var productName = selectedOption.data('product');
-                                if (productName) {
-                                    $('#pro-support-product-name').val(productName);
-                                }
-                            });
-                        } else {
-                            licenseSelect.html('<option value=\"\">' + pro_support.strings.no_license_found + '</option>');
-                        }
-                    },
-                    error: function() {
-                        licenseSelect.html('<option value=\"\">' + pro_support.strings.error + '</option>');
-                    }
-                });
-            });
-
-            // Ticket form submission
-            $('#pro-support-ticket-form').on('submit', function(e) {
-                e.preventDefault();
-               
-                var form = $(this);
-                var submitBtn = form.find('button[type=\"submit\"]');
-                var originalText = submitBtn.html();
-               
-                if (!$('#pro-support-subject').val() || !$('#pro-support-description').val()) {
-                    alert('Please fill in all required fields.');
-                    return;
-                }
-               
-                var formData = new FormData(form[0]);
-                formData.append('action', 'pro_support_submit_ticket');
-                formData.append('nonce', pro_support.nonce);
-               
-                submitBtn.prop('disabled', true).html('<span class=\"pro-support-loading\"></span> ' + pro_support.strings.loading);
-               
-                $.ajax({
-                    url: pro_support.ajax_url,
-                    type: 'POST',
-                    data: formData,
-                    processData: false,
-                    contentType: false,
-                    success: function(response) {
-                        if (response.success) {
-                            alert(response.data.message);
-                            form[0].reset();
-                            if (response.data.redirect_url) {
-                                window.location.href = response.data.redirect_url;
-                            }
-                        } else {
-                            alert(response.data.message);
-                            submitBtn.prop('disabled', false).html(originalText);
-                        }
-                    },
-                    error: function() {
-                        alert(pro_support.strings.error);
-                        submitBtn.prop('disabled', false).html(originalText);
-                    }
-                });
-            });
-
-            // Auto-fill order ID from URL
-            var urlParams = new URLSearchParams(window.location.search);
-            var orderId = urlParams.get('order');
-            if (orderId) {
-                $('#pro-support-order-id').val(orderId).trigger('change');
-            }
-        });
-        ";
-    }
-
-    // Shortcode implementations
-    public function dashboard_shortcode($atts = []) {
-        if (!is_user_logged_in()) {
-            return $this->login_required_message();
-        }
-       
-        ob_start();
-        ?>
-        <div class="pro-support-container">
-            <div class="pro-support-header">
-                <h1 class="pro-support-title">Support Dashboard</h1>
-                <a href="<?php echo home_url('/report-a-problem/'); ?>" class="pro-support-btn pro-support-btn-report">
-                    Report a Problem
-                </a>
-            </div>
-
-            <div class="pro-support-stats">
-                <div class="pro-support-stat-card">
-                    <span class="pro-support-stat-number">0</span>
-                    Total Tickets
-                </div>
-                <div class="pro-support-stat-card">
-                    <span class="pro-support-stat-number">0</span>
-                    Open Tickets
-                </div>
-                <div class="pro-support-stat-card">
-                    <span class="pro-support-stat-number">0</span>
-                    Pending
-                </div>
-                <div class="pro-support-stat-card">
-                    <span class="pro-support-stat-number">0</span>
-                    Resolved
-                </div>
-            </div>
-
-            <div class="pro-support-card">
-                <h3>Your Support Tickets</h3>
-                <div class="pro-support-alert pro-support-alert-success">
-                    <p>No tickets found. Click "Report a Problem" to create your first support ticket.</p>
-                </div>
-            </div>
-        </div>
-        <?php
-        return ob_get_clean();
-    }
-
-    public function ticket_form_shortcode($atts = []) {
-        if (!is_user_logged_in()) {
-            return $this->login_required_message();
-        }
-       
-        $orders = $this->get_user_orders();
-       
-        ob_start();
-        ?>
-        <div class="pro-support-container">
-            <div class="pro-support-card">
-                <div class="pro-support-header">
-                    <h1 class="pro-support-title">Report a Problem</h1>
-                </div>
-
-                <?php if (isset($_GET['order']) && !empty($_GET['order'])): ?>
-                    <?php 
-                    $order_id = intval($_GET['order']);
-                    $order = wc_get_order($order_id);
-                    if ($order && $order->get_user_id() == get_current_user_id()):
-                    ?>
-                    <div class="pro-support-order-info">
-                        <h4>Order Information</h4>
-                        <p>You're reporting a problem for Order #<?php echo $order->get_id(); ?> from <?php echo $order->get_date_created()->format('F j, Y'); ?></p>
-                    </div>
-                    <?php endif; ?>
-                <?php endif; ?>
-
-                <form id="pro-support-ticket-form">
-                    <?php wp_nonce_field('pro_support_submit_ticket', 'pro_support_nonce'); ?>
-                   
-                    <?php if (!empty($orders)): ?>
-                    <div class="pro-support-form-group">
-                        <label for="pro-support-order-id">Select Order *</label>
-                        <select id="pro-support-order-id" name="order_id" class="pro-support-form-control" required>
-                            <option value="">Select your order</option>
-                            <?php foreach ($orders as $order): ?>
-                                <option value="<?php echo $order->get_id(); ?>" <?php selected(isset($_GET['order']) && $_GET['order'] == $order->get_id()); ?>>
-                                    Order #<?php echo $order->get_id(); ?> - <?php echo $order->get_date_created()->format('M j, Y'); ?>
-                                </option>
-                            <?php endforeach; ?>
-                        </select>
-                    </div>
-
-                    <div class="pro-support-license-box">
-                        <div class="pro-support-form-group">
-                            <label for="pro-support-license-key">Select License Key</label>
-                            <select id="pro-support-license-key" name="license_key" class="pro-support-form-control">
-                                <option value="">First select an order above</option>
-                            </select>
-                        </div>
-                       
-                        <div class="pro-support-form-group">
-                            <label for="pro-support-product-name">Product Name</label>
-                            <input type="text" id="pro-support-product-name" name="product_name" class="pro-support-form-control" readonly placeholder="Will be auto-filled when you select a license key">
-                        </div>
-                    </div>
-                    <?php endif; ?>
-                   
-                    <div class="pro-support-form-group">
-                        <label for="pro-support-subject">Problem Subject *</label>
-                        <input type="text" id="pro-support-subject" name="subject" class="pro-support-form-control" required placeholder="Brief description of the problem">
-                    </div>
-                   
-                    <div class="pro-support-form-group">
-                        <label for="pro-support-description">Problem Description *</label>
-                        <textarea id="pro-support-description" name="description" class="pro-support-form-control" rows="8" required placeholder="Please describe the problem in detail"></textarea>
-                    </div>
-                   
-                    <div class="pro-support-form-group">
-                        <label for="pro-support-priority">Priority Level</label>
-                        <select id="pro-support-priority" name="priority" class="pro-support-form-control">
-                            <option value="low">Low - General question</option>
-                            <option value="medium" selected>Medium - Feature not working</option>
-                            <option value="high">High - Critical functionality broken</option>
-                            <option value="urgent">Urgent - System down or major issue</option>
-                        </select>
-                    </div>
-                   
-                    <button type="submit" class="pro-support-btn pro-support-btn-block pro-support-btn-report">
-                        Report Problem
-                    </button>
-                </form>
-            </div>
-        </div>
-        <?php
-        return ob_get_clean();
-    }
-
-    // WooCommerce integration methods
-    public function add_report_problem_section($order) {
-        if (!$order || $order->get_user_id() !== get_current_user_id()) {
-            return;
-        }
-       
-        $order_id = $order->get_id();
-       
-        echo '<div class="pro-support-order-section" style="margin-top: 20px; padding: 20px; background: #f8f9fa; border-radius: 8px;">';
-        echo '<h3>Need Help with Your Order?</h3>';
-        echo '<p>Having issues with your software licenses or product? Our support team is here to help.</p>';
-        echo '<a href="' . esc_url(home_url('/report-a-problem/?order=' . $order_id)) . '" class="pro-support-btn pro-support-btn-report">';
-        echo 'Report a Problem';
-        echo '</a>';
-        echo '</div>';
-    }
-
-    public function add_support_menu_item($items) {
-        $new_items = array();
-        $new_items['support-tickets'] = 'Support Tickets';
-       
-        $logout_item = $items['customer-logout'];
-        unset($items['customer-logout']);
-       
-        $items = array_merge($items, $new_items);
-        $items['customer-logout'] = $logout_item;
-       
-        return $items;
-    }
-
-    public function support_tickets_endpoint() {
-        echo do_shortcode('[support_dashboard]');
-    }
-
-    public function handle_template_redirect() {
-        $page = get_query_var('pro_support_page');
-       
-        if ($page === 'dashboard') {
-            $this->load_dashboard_template();
-            exit;
-        } elseif ($page === 'view-ticket') {
-            $this->load_ticket_template();
-            exit;
-        }
-    }
-
-    private function load_dashboard_template() {
-        if (!is_user_logged_in()) {
-            wp_redirect(wp_login_url(home_url('/support/dashboard/')));
-            exit;
-        }
-       
-        get_header();
-        echo do_shortcode('[support_dashboard]');
-        get_footer();
-        exit;
-    }
-
-    private function load_ticket_template() {
-        if (!is_user_logged_in()) {
-            wp_redirect(wp_login_url(home_url('/support/ticket/' . get_query_var('ticket_id'))));
-            exit;
-        }
-       
-        get_header();
-        echo '<div class="pro-support-container">';
-        echo '<div class="pro-support-card">';
-        echo '<h1>Ticket Details</h1>';
-        echo '<p>Ticket #' . get_query_var('ticket_id') . ' details will be displayed here.</p>';
-        echo '</div>';
-        echo '</div>';
-        get_footer();
-        exit;
-    }
-
-    // AJAX handlers
-    public function ajax_submit_ticket() {
-        check_ajax_referer('pro_support_nonce', 'nonce');
-       
-        if (!is_user_logged_in()) {
-            wp_send_json_error(array('message' => 'You must be logged in to submit a ticket.'));
-        }
-       
-        $current_user = wp_get_current_user();
-       
-        if (empty($_POST['subject']) || empty($_POST['description']) || empty($_POST['order_id'])) {
-            wp_send_json_error(array('message' => 'Please fill in all required fields.'));
-        }
-       
-        $order_id = intval($_POST['order_id']);
-        $order = wc_get_order($order_id);
-       
-        if (!$order || $order->get_user_id() !== $current_user->ID) {
-            wp_send_json_error(array('message' => 'Invalid order.'));
-        }
-       
-        // For now, just return success without database operations
-        wp_send_json_success(array(
-            'message' => 'Your problem has been reported successfully! Our support team will contact you soon.',
-            'redirect_url' => home_url('/support/dashboard/')
-        ));
-    }
-
-    public function ajax_get_license_keys() {
-        check_ajax_referer('pro_support_nonce', 'nonce');
-       
-        if (!is_user_logged_in()) {
-            wp_send_json_error(array('message' => 'Unauthorized'));
-        }
-       
-        $order_id = intval($_POST['order_id']);
-        $order = wc_get_order($order_id);
-       
-        if (!$order || $order->get_user_id() !== get_current_user_id()) {
-            wp_send_json_error(array('message' => 'Invalid order'));
-        }
-       
-        // Get license keys from order meta
-        $license_keys = array();
-       
-        foreach ($order->get_items() as $item) {
-            $product = $item->get_product();
-            if ($product) {
-                // Try to get license key from different meta fields
-                $license_key = $item->get_meta('_license_key');
-                if (!$license_key) {
-                    $license_key = $item->get_meta('license_key');
-                }
-                if (!$license_key) {
-                    $license_key = 'LIC-' . strtoupper(wp_generate_password(8, false));
-                }
-               
-                $license_keys[] = array(
-                    'key' => $license_key,
-                    'product_name' => $product->get_name()
-                );
-            }
-        }
-       
-        wp_send_json_success($license_keys);
-    }
-
-    // Helper methods
-    private function get_user_orders() {
-        if (!is_user_logged_in()) {
-            return array();
-        }
-       
-        $customer_orders = wc_get_orders(array(
-            'customer_id' => get_current_user_id(),
-            'limit' => 10,
-            'orderby' => 'date',
-            'order' => 'DESC',
-            'status' => array('completed', 'processing')
-        ));
-       
-        return $customer_orders;
-    }
-   
-    private function login_required_message() {
-        return '<div class="pro-support-container">
-            <div class="pro-support-card">
-                <div class="pro-support-alert pro-support-alert-error">
-                    <p>Please log in to access the support system.</p>
-                </div>
-                <a href="' . wp_login_url(get_permalink()) . '" class="pro-support-btn pro-support-btn-block">
-                    Login to Continue
-                </a>
-            </div>
-        </div>';
-    }
-}
-
-// Initialize the plugin
-ProfessionalSupportSystem::get_instance();
+// Define plugin constants
+define('AVIF_OPTIMIZER_VERSION', '1.0.0');
+define('AVIF_OPTIMIZER_PATH', plugin_dir_path(__FILE__));
+define('AVIF_OPTIMIZER_URL', plugin_dir_url(__FILE__));
 
 // Activation hook
-register_activation_hook(__FILE__, function() {
-    flush_rewrite_rules();
-});
+register_activation_hook(__FILE__, 'avif_optimizer_activate');
+function avif_optimizer_activate() {
+    // Set default options
+    if (!get_option('avif_optimizer_settings')) {
+        $default_settings = array(
+            'enable_avif' => 1,
+            'enable_webp' => 1,
+            'compression_level' => 'balanced',
+            'batch_size' => 20
+        );
+        update_option('avif_optimizer_settings', $default_settings);
+    }
+}
+
+// Add admin menu
+add_action('admin_menu', 'avif_optimizer_add_admin_menu');
+add_action('admin_init', 'avif_optimizer_settings_init');
+
+function avif_optimizer_add_admin_menu() {
+    add_submenu_page(
+        'woodmart_options',  // This makes it appear under WoodMart settings
+        'AVIF Optimizer',
+        'AVIF Optimizer',
+        'manage_options',
+        'avif-image-optimizer',
+        'avif_optimizer_settings_page'
+    );
+}
+
+function avif_optimizer_settings_init() {
+    register_setting('avif_optimizer_settings_group', 'avif_optimizer_settings');
+    
+    add_settings_section(
+        'avif_optimizer_settings_section',
+        'AVIF Optimization Settings',
+        'avif_optimizer_settings_section_callback',
+        'avif-image-optimizer'
+    );
+    
+    add_settings_field(
+        'enable_avif',
+        'Enable AVIF Generation',
+        'avif_checkbox_render',
+        'avif-image-optimizer',
+        'avif_optimizer_settings_section',
+        array('name' => 'enable_avif')
+    );
+    
+    add_settings_field(
+        'enable_webp',
+        'Enable WebP Generation',
+        'avif_checkbox_render',
+        'avif-image-optimizer',
+        'avif_optimizer_settings_section',
+        array('name' => 'enable_webp')
+    );
+    
+    add_settings_field(
+        'compression_level',
+        'Compression Level',
+        'avif_compression_render',
+        'avif-image-optimizer',
+        'avif_optimizer_settings_section'
+    );
+    
+    add_settings_field(
+        'batch_size',
+        'Batch Size',
+        'avif_batch_size_render',
+        'avif-image-optimizer',
+        'avif_optimizer_settings_section'
+    );
+}
+
+function avif_checkbox_render($args) {
+    $options = get_option('avif_optimizer_settings');
+    $name = $args['name'];
+    ?>
+    <input type="checkbox" name="avif_optimizer_settings[<?php echo $name; ?>]" value="1" <?php checked(isset($options[$name]) ? $options[$name] : 0, 1); ?>>
+    <?php
+}
+
+function avif_compression_render() {
+    $options = get_option('avif_optimizer_settings');
+    $compression = isset($options['compression_level']) ? $options['compression_level'] : 'balanced';
+    ?>
+    <select name="avif_optimizer_settings[compression_level]">
+        <option value="lossless" <?php selected($compression, 'lossless'); ?>>Lossless</option>
+        <option value="balanced" <?php selected($compression, 'balanced'); ?>>Balanced</option>
+        <option value="lossy" <?php selected($compression, 'lossy'); ?>>Lossy</option>
+    </select>
+    <?php
+}
+
+function avif_batch_size_render() {
+    $options = get_option('avif_optimizer_settings');
+    $batch_size = isset($options['batch_size']) ? $options['batch_size'] : 20;
+    ?>
+    <input type="number" name="avif_optimizer_settings[batch_size]" value="<?php echo $batch_size; ?>" min="5" max="100">
+    <?php
+}
+
+function avif_optimizer_settings_section_callback() {
+    echo 'Configure your AVIF image optimization settings below.';
+}
+
+function avif_optimizer_settings_page() {
+    ?>
+    <div class="wrap">
+        <h1>AVIF Image Optimizer</h1>
+        
+        <div class="card">
+            <h2>Optimization Statistics</h2>
+            <div id="avif-stats">
+                <p>Loading statistics...</p>
+            </div>
+        </div>
+        
+        <form method="post" action="options.php">
+            <?php
+            settings_fields('avif_optimizer_settings_group');
+            do_settings_sections('avif-image-optimizer');
+            submit_button();
+            ?>
+        </form>
+        
+        <div class="card">
+            <h2>Bulk Optimization</h2>
+            <p>Click the button below to start optimizing all images in your media library.</p>
+            <button id="bulk-optimize" class="button button-primary">Start Bulk Optimization</button>
+            <div id="optimization-progress" style="margin-top: 20px; display: none;">
+                <div class="progress-bar">
+                    <div id="progress-fill" style="width: 0%; background-color: #0073aa; height: 20px;"></div>
+                </div>
+                <p id="progress-text">Processing...</p>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        jQuery(document).ready(function($) {
+            // Load statistics
+            $.ajax({
+                url: ajaxurl,
+                type: 'POST',
+                data: {
+                    action: 'avif_get_stats'
+                },
+                success: function(response) {
+                    $('#avif-stats').html(response);
+                }
+            });
+            
+            // Bulk optimization
+            $('#bulk-optimize').on('click', function() {
+                $('#optimization-progress').show();
+                optimizeBatch(0);
+            });
+            
+            function optimizeBatch(offset) {
+                $.ajax({
+                    url: ajaxurl,
+                    type: 'POST',
+                    data: {
+                        action: 'avif_bulk_optimize',
+                        offset: offset
+                    },
+                    success: function(response) {
+                        if (response.success) {
+                            const progress = response.data.progress;
+                            $('#progress-fill').css('width', progress + '%');
+                            $('#progress-text').text(response.data.message);
+                            
+                            if (progress < 100) {
+                                optimizeBatch(response.data.offset);
+                            } else {
+                                setTimeout(function() {
+                                    location.reload();
+                                }, 2000);
+                            }
+                        }
+                    }
+                });
+            }
+        });
+    </script>
+    <?php
+}
+
+// AJAX handlers
+add_action('wp_ajax_avif_get_stats', 'avif_get_stats');
+function avif_get_stats() {
+    global $wpdb;
+    
+    $total_images = $wpdb->get_var("SELECT COUNT(*) FROM $wpdb->posts WHERE post_type = 'attachment' AND post_mime_type LIKE 'image/%'");
+    $optimized_images = $wpdb->get_var("SELECT COUNT(*) FROM $wpdb->postmeta WHERE meta_key = '_avif_generated'");
+    $unoptimized = $total_images - $optimized_images;
+    
+    ob_start();
+    ?>
+    <p>Total images: <?php echo $total_images; ?></p>
+    <p>Optimized images: <?php echo $optimized_images; ?></p>
+    <p>Unoptimized images: <?php echo $unoptimized; ?></p>
+    <?php
+    $response = ob_get_clean();
+    
+    wp_send_json_success($response);
+}
+
+add_action('wp_ajax_avif_bulk_optimize', 'avif_bulk_optimize');
+function avif_bulk_optimize() {
+    $options = get_option('avif_optimizer_settings');
+    $batch_size = isset($options['batch_size']) ? $options['batch_size'] : 20;
+    $offset = isset($_POST['offset']) ? intval($_POST['offset']) : 0;
+    
+    $args = array(
+        'post_type' => 'attachment',
+        'post_mime_type' => 'image/*',
+        'posts_per_page' => $batch_size,
+        'offset' => $offset,
+        'meta_query' => array(
+            array(
+                'key' => '_avif_generated',
+                'compare' => 'NOT EXISTS'
+            )
+        )
+    );
+    
+    $query = new WP_Query($args);
+    $processed = 0;
+    
+    if ($query->have_posts()) {
+        while ($query->have_posts()) {
+            $query->the_post();
+            $attachment_id = get_the_ID();
+            
+            // Generate AVIF and WebP versions
+            avif_generate_alternatives($attachment_id);
+            $processed++;
+        }
+    }
+    
+    wp_reset_postdata();
+    
+    // Get total unoptimized count for progress calculation
+    global $wpdb;
+    $total_images = $wpdb->get_var("SELECT COUNT(*) FROM $wpdb->posts WHERE post_type = 'attachment' AND post_mime_type LIKE 'image/%'");
+    $optimized_images = $wpdb->get_var("SELECT COUNT(*) FROM $wpdb->postmeta WHERE meta_key = '_avif_generated'");
+    $unoptimized = $total_images - $optimized_images;
+    
+    if ($processed < $batch_size) {
+        // All images processed
+        wp_send_json_success(array(
+            'progress' => 100,
+            'message' => 'Optimization complete!',
+            'offset' => $offset + $processed
+        ));
+    } else {
+        // More images to process
+        $progress = min(100, round(($optimized_images / $total_images) * 100));
+        wp_send_json_success(array(
+            'progress' => $progress,
+            'message' => "Processed $optimized_images of $total_images images...",
+            'offset' => $offset + $processed
+        ));
+    }
+}
+
+// Hook into new uploads
+add_action('add_attachment', 'avif_process_new_attachment');
+
+function avif_process_new_attachment($attachment_id) {
+    // Only process images
+    if (!wp_attachment_is_image($attachment_id)) {
+        return;
+    }
+    
+    avif_generate_alternatives($attachment_id);
+}
+
+function avif_generate_alternatives($attachment_id) {
+    $options = get_option('avif_optimizer_settings');
+    $enable_avif = isset($options['enable_avif']) ? $options['enable_avif'] : 1;
+    $enable_webp = isset($options['enable_webp']) ? $options['enable_webp'] : 1;
+    $compression = isset($options['compression_level']) ? $options['compression_level'] : 'balanced';
+    
+    // Get attachment metadata
+    $metadata = wp_get_attachment_metadata($attachment_id);
+    if (!$metadata) {
+        return;
+    }
+    
+    // Get file path
+    $upload_dir = wp_upload_dir();
+    $file_path = $upload_dir['basedir'] . '/' . $metadata['file'];
+    
+    // Check if file exists
+    if (!file_exists($file_path)) {
+        return;
+    }
+    
+    // Generate AVIF if enabled
+    if ($enable_avif) {
+        avif_convert_to_avif($file_path, $compression);
+    }
+    
+    // Generate WebP if enabled
+    if ($enable_webp) {
+        avif_convert_to_webp($file_path);
+    }
+    
+    // Process all image sizes
+    if (isset($metadata['sizes']) && is_array($metadata['sizes'])) {
+        foreach ($metadata['sizes'] as $size => $size_data) {
+            $size_file = dirname($file_path) . '/' . $size_data['file'];
+            
+            if (file_exists($size_file)) {
+                if ($enable_avif) {
+                    avif_convert_to_avif($size_file, $compression);
+                }
+                
+                if ($enable_webp) {
+                    avif_convert_to_webp($size_file);
+                }
+            }
+        }
+    }
+    
+    // Mark as processed
+    update_post_meta($attachment_id, '_avif_generated', time());
+}
+
+function avif_convert_to_avif($file_path, $compression = 'balanced') {
+    // Check if Imagick is available
+    if (!extension_loaded('imagick')) {
+        error_log('Imagick extension not available for AVIF conversion');
+        return false;
+    }
+    
+    try {
+        $image = new Imagick($file_path);
+        
+        // Set compression quality based on setting
+        switch ($compression) {
+            case 'lossless':
+                $image->setOption('avif:compression-level', 0);
+                $image->setOption('avif:lossless', 'true');
+                break;
+            case 'balanced':
+                $image->setOption('avif:compression-level', 50);
+                $image->setOption('avif:lossless', 'false');
+                break;
+            case 'lossy':
+                $image->setOption('avif:compression-level', 100);
+                $image->setOption('avif:lossless', 'false');
+                break;
+        }
+        
+        // Get file info
+        $path_info = pathinfo($file_path);
+        $avif_path = $path_info['dirname'] . '/' . $path_info['filename'] . '.avif';
+        
+        // Convert and save
+        $image->setImageFormat('avif');
+        $image->writeImage($avif_path);
+        $image->clear();
+        
+        return true;
+    } catch (Exception $e) {
+        error_log('AVIF conversion error: ' . $e->getMessage());
+        return false;
+    }
+}
+
+function avif_convert_to_webp($file_path) {
+    // Check if GD is available
+    if (!extension_loaded('gd')) {
+        error_log('GD extension not available for WebP conversion');
+        return false;
+    }
+    
+    try {
+        // Get file info
+        $path_info = pathinfo($file_path);
+        $webp_path = $path_info['dirname'] . '/' . $path_info['filename'] . '.webp';
+        
+        // Get image type
+        $image_type = exif_imagetype($file_path);
+        
+        switch ($image_type) {
+            case IMAGETYPE_JPEG:
+                $image = imagecreatefromjpeg($file_path);
+                break;
+            case IMAGETYPE_PNG:
+                $image = imagecreatefrompng($file_path);
+                // Preserve transparency
+                imagepalettetotruecolor($image);
+                imagealphablending($image, true);
+                imagesavealpha($image, true);
+                break;
+            case IMAGETYPE_GIF:
+                $image = imagecreatefromgif($file_path);
+                break;
+            default:
+                return false;
+        }
+        
+        // Convert and save
+        imagewebp($image, $webp_path, 85);
+        imagedestroy($image);
+        
+        return true;
+    } catch (Exception $e) {
+        error_log('WebP conversion error: ' . $e->getMessage());
+        return false;
+    }
+}
+
+// Filter image output to use picture tags
+add_filter('wp_get_attachment_image_attributes', 'avif_modify_image_attributes', 10, 3);
+add_filter('post_thumbnail_html', 'avif_modify_thumbnail_html', 10, 5);
+
+function avif_modify_image_attributes($attr, $attachment, $size) {
+    // Only modify on frontend
+    if (is_admin()) {
+        return $attr;
+    }
+    
+    // Get attachment metadata
+    $metadata = wp_get_attachment_metadata($attachment->ID);
+    if (!$metadata) {
+        return $attr;
+    }
+    
+    // Check if AVIF was generated
+    $avif_generated = get_post_meta($attachment->ID, '_avif_generated', true);
+    if (!$avif_generated) {
+        return $attr;
+    }
+    
+    // Get upload directory
+    $upload_dir = wp_upload_dir();
+    
+    // Get original file URL
+    if (isset($attr['src'])) {
+        $original_url = $attr['src'];
+    } else {
+        $original_url = wp_get_attachment_image_url($attachment->ID, $size);
+    }
+    
+    if (!$original_url) {
+        return $attr;
+    }
+    
+    // Get file path from URL
+    $file_path = str_replace($upload_dir['baseurl'], $upload_dir['basedir'], $original_url);
+    $path_info = pathinfo($file_path);
+    
+    // Create AVIF and WebP URLs
+    $avif_url = $upload_dir['baseurl'] . '/' . $path_info['dirname'] . '/' . $path_info['filename'] . '.avif';
+    $webp_url = $upload_dir['baseurl'] . '/' . $path_info['dirname'] . '/' . $path_info['filename'] . '.webp';
+    
+    // Check if files exist
+    $avif_exists = file_exists($path_info['dirname'] . '/' . $path_info['filename'] . '.avif');
+    $webp_exists = file_exists($path_info['dirname'] . '/' . $path_info['filename'] . '.webp');
+    
+    // Store original attributes for later use
+    $attr['data-original-src'] = $attr['src'];
+    $attr['data-original-srcset'] = isset($attr['srcset']) ? $attr['srcset'] : '';
+    $attr['data-original-sizes'] = isset($attr['sizes']) ? $attr['sizes'] : '';
+    
+    // Set new attributes
+    if ($avif_exists) {
+        $attr['data-avif-src'] = $avif_url;
+    }
+    
+    if ($webp_exists) {
+        $attr['data-webp-src'] = $webp_url;
+    }
+    
+    return $attr;
+}
+
+function avif_modify_thumbnail_html($html, $post_id, $post_thumbnail_id, $size, $attr) {
+    // Only modify on frontend
+    if (is_admin()) {
+        return $html;
+    }
+    
+    // Check if AVIF was generated
+    $avif_generated = get_post_meta($post_thumbnail_id, '_avif_generated', true);
+    if (!$avif_generated) {
+        return $html;
+    }
+    
+    // Get upload directory
+    $upload_dir = wp_upload_dir();
+    
+    // Get original file URL
+    $original_url = wp_get_attachment_image_url($post_thumbnail_id, $size);
+    if (!$original_url) {
+        return $html;
+    }
+    
+    // Get file path from URL
+    $file_path = str_replace($upload_dir['baseurl'], $upload_dir['basedir'], $original_url);
+    $path_info = pathinfo($file_path);
+    
+    // Create AVIF and WebP URLs
+    $avif_url = $upload_dir['baseurl'] . '/' . $path_info['dirname'] . '/' . $path_info['filename'] . '.avif';
+    $webp_url = $upload_dir['baseurl'] . '/' . $path_info['dirname'] . '/' . $path_info['filename'] . '.webp';
+    
+    // Check if files exist
+    $avif_exists = file_exists($path_info['dirname'] . '/' . $path_info['filename'] . '.avif');
+    $webp_exists = file_exists($path_info['dirname'] . '/' . $path_info['filename'] . '.webp');
+    
+    if (!$avif_exists && !$webp_exists) {
+        return $html;
+    }
+    
+    // Extract img attributes
+    $img_pattern = '/<img([^>]*)>/';
+    preg_match($img_pattern, $html, $img_matches);
+    
+    if (empty($img_matches)) {
+        return $html;
+    }
+    
+    $img_attributes = $img_matches[1];
+    
+    // Build picture tag
+    $picture_html = '<picture>';
+    
+    if ($avif_exists) {
+        $picture_html .= '<source srcset="' . esc_url($avif_url) . '" type="image/avif">';
+    }
+    
+    if ($webp_exists) {
+        $picture_html .= '<source srcset="' . esc_url($webp_url) . '" type="image/webp">';
+    }
+    
+    $picture_html .= '<img' . $img_attributes . '>';
+    $picture_html .= '</picture>';
+    
+    return $picture_html;
+}
+
+// Add JavaScript to handle dynamic images (like in WooCommerce galleries)
+add_action('wp_footer', 'avif_add_frontend_script');
+function avif_add_frontend_script() {
+    ?>
+    <script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // Function to convert img tags with data attributes to picture tags
+        function convertImagesToPicture() {
+            const images = document.querySelectorAll('img[data-avif-src], img[data-webp-src]');
+            
+            images.forEach(function(img) {
+                // Skip if already in a picture tag
+                if (img.parentNode.tagName === 'PICTURE') {
+                    return;
+                }
+                
+                const avifSrc = img.getAttribute('data-avif-src');
+                const webpSrc = img.getAttribute('data-webp-src');
+                
+                if (!avifSrc && !webpSrc) {
+                    return;
+                }
+                
+                // Create picture element
+                const picture = document.createElement('picture');
+                
+                // Add AVIF source if available
+                if (avifSrc) {
+                    const avifSource = document.createElement('source');
+                    avifSource.setAttribute('srcset', avifSrc);
+                    avifSource.setAttribute('type', 'image/avif');
+                    picture.appendChild(avifSource);
+                }
+                
+                // Add WebP source if available
+                if (webpSrc) {
+                    const webpSource = document.createElement('source');
+                    webpSource.setAttribute('srcset', webpSrc);
+                    webpSource.setAttribute('type', 'image/webp');
+                    picture.appendChild(webpSource);
+                }
+                
+                // Clone the original img
+                const imgClone = img.cloneNode(true);
+                
+                // Remove data attributes
+                imgClone.removeAttribute('data-avif-src');
+                imgClone.removeAttribute('data-webp-src');
+                imgClone.removeAttribute('data-original-src');
+                imgClone.removeAttribute('data-original-srcset');
+                imgClone.removeAttribute('data-original-sizes');
+                
+                // Add img to picture
+                picture.appendChild(imgClone);
+                
+                // Replace original img with picture
+                img.parentNode.replaceChild(picture, img);
+            });
+        }
+        
+        // Run on page load
+        convertImagesToPicture();
+        
+        // Run after AJAX requests (for WooCommerce galleries, etc.)
+        if (typeof MutationObserver !== 'undefined') {
+            const observer = new MutationObserver(function(mutations) {
+                mutations.forEach(function(mutation) {
+                    if (mutation.addedNodes.length) {
+                        convertImagesToPicture();
+                    }
+                });
+            });
+            
+            observer.observe(document.body, {
+                childList: true,
+                subtree: true
+            });
+        }
+    });
+    </script>
+    <?php
+}
