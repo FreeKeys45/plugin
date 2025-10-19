@@ -560,7 +560,6 @@ class Support_Ticket_System {
                     'required_field' => __('This field is required.', 'support-ticket-system'),
                     'file_too_big' => __('File is too large. Maximum size is 50MB.', 'support-ticket-system'),
                     'invalid_file_type' => __('Invalid file type. Allowed types: png, jpg, jpeg, pdf, txt, mp4, mov, avi, webm', 'support-ticket-system'),
-                    'screenshot_required' => __('Please upload at least one screenshot or video to better understand your issue.', 'support-ticket-system'),
                 )
             ));
         }
@@ -1414,13 +1413,6 @@ class Support_Ticket_System {
                     $('#support-ticket-form-message').html('<div class="support-ticket-alert support-ticket-alert-error">' + support_ticket.strings.required_field + '</div>');
                     return;
                 }
-
-                // Validate that at least one screenshot/video is uploaded
-                var fileInput = form.find('input[type="file"]')[0];
-                if (!fileInput || fileInput.files.length === 0) {
-                    $('#support-ticket-form-message').html('<div class="support-ticket-alert support-ticket-alert-error">' + support_ticket.strings.screenshot_required + '</div>');
-                    return;
-                }
                
                 // Validate file uploads
                 var fileInputs = form.find('input[type="file"]');
@@ -2015,12 +2007,12 @@ class Support_Ticket_System {
                         </div>
                        
                         <div class="support-ticket-form-group">
-                            <label for="support-attachments"><?php _e('Attachments (Screenshots/Videos Required)', 'support-ticket-system'); ?> *</label>
-                            <div class="support-ticket-alert support-ticket-alert-warning">
-                                <strong><?php _e('Important:', 'support-ticket-system'); ?></strong> <?php _e('Please upload screenshots or screen recordings to help us understand your issue better. Tickets without visual evidence may take longer to resolve.', 'support-ticket-system'); ?>
+                            <label for="support-attachments"><?php _e('Attachments (Screenshots/Videos)', 'support-ticket-system'); ?></label>
+                            <div class="support-ticket-alert support-ticket-alert-info">
+                                <strong><?php _e('Optional:', 'support-ticket-system'); ?></strong> <?php _e('You can upload screenshots or screen recordings to help us understand your issue better.', 'support-ticket-system'); ?>
                             </div>
                             <div class="support-ticket-file-upload">
-                                <input type="file" id="support-attachments" name="attachments[]" class="support-ticket-file-input" multiple accept=".png,.jpg,.jpeg,.pdf,.txt,.mp4,.mov,.avi,.webm" required>
+                                <input type="file" id="support-attachments" name="attachments[]" class="support-ticket-file-input" multiple accept=".png,.jpg,.jpeg,.pdf,.txt,.mp4,.mov,.avi,.webm">
                                 <small><?php _e('You can upload up to 5 files. Maximum file size: 50MB. Allowed types: PNG, JPG, JPEG, PDF, TXT, MP4, MOV, AVI, WEBM', 'support-ticket-system'); ?></small>
                                 <div class="support-ticket-file-list"></div>
                             </div>
@@ -2384,9 +2376,9 @@ class Support_Ticket_System {
             }
         }
 
-        // Validate that at least one file is uploaded for screenshots/videos
-        if (empty($_FILES['attachments']) || $_FILES['attachments']['error'][0] == UPLOAD_ERR_NO_FILE) {
-            wp_send_json_error(array('message' => __('Please upload at least one screenshot or video to better understand your issue.', 'support-ticket-system')));
+        // Validate license status if it's a license issue
+        if ($_POST['issue_category'] === 'license_issue' && empty($_POST['license_status'])) {
+            wp_send_json_error(array('message' => __('Please select a license key status for license issues.', 'support-ticket-system')));
         }
        
         // Validate order ownership
@@ -2395,11 +2387,6 @@ class Support_Ticket_System {
        
         if (!$order || $order->get_user_id() !== $current_user->ID) {
             wp_send_json_error(array('message' => __('Invalid order.', 'support-ticket-system')));
-        }
-       
-        // Validate license status if it's a license issue
-        if ($_POST['issue_category'] === 'license_issue' && empty($_POST['license_status'])) {
-            wp_send_json_error(array('message' => __('Please select a license key status for license issues.', 'support-ticket-system')));
         }
        
         // Generate unique ticket ID
