@@ -2053,7 +2053,7 @@ class Support_Ticket_System {
             <div class="support-ticket-card">
                 <div class="support-ticket-header">
                     <h1 class="support-ticket-title"><?php _e('My Support Tickets', 'support-ticket-system'); ?></h1>
-                    <a href="<?php echo esc_url(home_url('/submit-ticket/')); ?>" class="support-ticket-btn support-ticket-btn-primary">
+                    <a href="<?php echo esc_url(home_url('/create-ticket/')); ?>" class="support-ticket-btn support-ticket-btn-primary">
                         <?php _e('Create New Ticket', 'support-ticket-system'); ?>
                     </a>
                 </div>
@@ -2062,7 +2062,7 @@ class Support_Ticket_System {
                 <div class="support-ticket-help-section">
                     <h3><?php _e('Need Help?', 'support-ticket-system'); ?></h3>
                     <p><?php _e('If you have any issues with your purchase, click the button below to report a problem:', 'support-ticket-system'); ?></p>
-                    <a href="<?php echo esc_url(home_url('/submit-ticket/')); ?>" class="support-ticket-btn-report">
+                    <a href="<?php echo esc_url(home_url('/create-ticket/')); ?>" class="support-ticket-btn-report">
                         <span class="support-ticket-btn-icon"> </span>
                         <?php _e('Report a Problem', 'support-ticket-system'); ?>
                     </a>
@@ -2071,7 +2071,7 @@ class Support_Ticket_System {
                 <?php if (empty($tickets)): ?>
                     <div class="support-ticket-no-tickets">
                         <p><?php _e('You haven\'t submitted any support tickets yet.', 'support-ticket-system'); ?></p>
-                        <a href="<?php echo esc_url(home_url('/submit-ticket/')); ?>" class="support-ticket-btn support-ticket-btn-primary">
+                        <a href="<?php echo esc_url(home_url('/create-ticket/')); ?>" class="support-ticket-btn support-ticket-btn-primary">
                             <?php _e('Create Your First Ticket', 'support-ticket-system'); ?>
                         </a>
                     </div>
