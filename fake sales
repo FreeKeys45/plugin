@@ -1724,7 +1724,7 @@ class Support_Ticket_System {
         return ob_get_clean();
     }
 
-    // Add report button to order details (Dashboard)
+    // Add report button to order details (Dashboard) - UPDATED VERSION
     public function add_report_problem_button($order) {
         if (!$order || $order->get_user_id() !== get_current_user_id()) {
             return;
@@ -2112,8 +2112,7 @@ class Support_Ticket_System {
                                         <?php echo esc_html(ucfirst($status ?: 'open')); ?>
                                     </div>
                                     <div class="support-ticket-priority support-priority-<?php echo esc_attr($priority ?: 'medium'); ?>">
-                                        <?php echo esc_html(ucfirst($priority ?: 'medium')); ?>
-                                    </div>
+                                        <?php echo esc_html(ucfirst($priority ?: 'medium')); ?></div>
                                     <div class="support-ticket-date"><?php echo esc_html(date('M j, Y', strtotime($last_update ?: $ticket->post_date))); ?></div>
                                     <a href="<?php echo esc_url($this->get_ticket_view_url($ticket_id ?: $ticket->ID)); ?>" class="support-ticket-btn support-ticket-btn-secondary">
                                         <?php _e('View', 'support-ticket-system'); ?>
