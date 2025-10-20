@@ -1248,7 +1248,7 @@ class Support_Ticket_System {
         .license-status-revoked { background: #e2e8f0; color: #4a5568; }
         .license-status-duplicate { background: #fef5e7; color: #744210; }
 
-        /* Submit Ticket Title Styling */
+        /* Create a ticket Title Styling */
         .support-ticket-submit-title {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
@@ -2029,7 +2029,7 @@ class Support_Ticket_System {
                         </div>
                        
                         <button type="submit" class="support-ticket-btn support-ticket-btn-primary support-ticket-btn-block">
-                            <?php _e('Submit Ticket', 'support-ticket-system'); ?>
+                            <?php _e('Create a ticket', 'support-ticket-system'); ?>
                         </button>
                     </form>
                 <?php endif; ?>
