@@ -1724,7 +1724,7 @@ class Support_Ticket_System {
         return ob_get_clean();
     }
 
-    // Add report button to order details and email - UPDATED VERSION
+    // Add report button to order details and email
     public function add_report_problem_button($order) {
         if (!$order || $order->get_user_id() !== get_current_user_id()) {
             return;
@@ -1750,29 +1750,31 @@ class Support_Ticket_System {
             }
         }
        
-        // Insert the same heading and description block that exists in the email function
-        echo '<div class="support-ticket-report-button-container">';
-        echo '<h3>' . __('Need Help?', 'support-ticket-system') . '</h3>';
-        echo '<p>' . __('If you have any issues with your purchase, click the button below to report a problem:', 'support-ticket-system') . '</p>';
-        
         if (!empty($license_keys)) {
             foreach ($license_keys as $license) {
                 echo '<div class="support-ticket-license-section">';
                 echo '<h4>' . esc_html($license['product']) . '</h4>';
                 echo '<div class="support-ticket-license-key">' . esc_html($license['key']) . '</div>';
+                echo '<div class="support-ticket-report-button-container">';
+                echo '<h3>' . __('Need Help?', 'support-ticket-system') . '</h3>';
+                echo '<p>' . __('If you have any issues with your purchase, click the button below to report a problem:', 'support-ticket-system') . '</p>';
                 echo '<a href="' . esc_url(home_url('/submit-ticket/?order_id=' . $order_id . '&product=' . urlencode($license['product']))) . '" class="support-ticket-btn-report">';
                 echo '<span class="support-ticket-btn-icon">🔧</span>';
                 echo __('Report a Problem', 'support-ticket-system');
                 echo '</a>';
                 echo '</div>';
+                echo '</div>';
             }
         } else {
+            echo '<div class="support-ticket-report-button-container">';
+            echo '<h3>' . __('Need Help?', 'support-ticket-system') . '</h3>';
+            echo '<p>' . __('If you have any issues with your purchase, click the button below to report a problem:', 'support-ticket-system') . '</p>';
             echo '<a href="' . esc_url(home_url('/submit-ticket/?order_id=' . $order_id)) . '" class="support-ticket-btn-report">';
             echo '<span class="support-ticket-btn-icon">🔧</span>';
             echo __('Report a Problem', 'support-ticket-system');
             echo '</a>';
+            echo '</div>';
         }
-        echo '</div>';
     }
 
     // Add report button to email - IDENTICAL TO DASHBOARD
@@ -2144,7 +2146,8 @@ class Support_Ticket_System {
                                         <?php echo esc_html(ucfirst($status ?: 'open')); ?>
                                     </div>
                                     <div class="support-ticket-priority support-priority-<?php echo esc_attr($priority ?: 'medium'); ?>">
-                                        <?php echo esc_html(ucfirst($priority ?: 'medium')); ?></div>
+                                        <?php echo esc_html(ucfirst($priority ?: 'medium')); ?>
+                                    </div>
                                     <div class="support-ticket-date"><?php echo esc_html(date('M j, Y', strtotime($last_update ?: $ticket->post_date))); ?></div>
                                     <a href="<?php echo esc_url($this->get_ticket_view_url($ticket_id ?: $ticket->ID)); ?>" class="support-ticket-btn support-ticket-btn-secondary">
                                         <?php _e('View', 'support-ticket-system'); ?>
