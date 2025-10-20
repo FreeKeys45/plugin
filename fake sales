@@ -290,7 +290,7 @@ class Support_Ticket_System {
     public function create_support_pages() {
         $pages = array(
             'submit-ticket' => array(
-                'title' => 'Submit Ticket',
+                'title' => 'Create a Ticket',
                 'content' => '[support_ticket_form]',
                 'parent' => 0
             ),
@@ -1908,7 +1908,7 @@ class Support_Ticket_System {
         <div class="support-ticket-container">
             <div class="support-ticket-card">
                 <div class="support-ticket-submit-title">
-                    <h1><?php _e('Submit Ticket', 'support-ticket-system'); ?></h1>
+                    <h1><?php _e('Create a Ticket', 'support-ticket-system'); ?></h1>
                 </div>
                
                 <div id="support-ticket-form-message"></div>
