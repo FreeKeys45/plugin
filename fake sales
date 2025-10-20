@@ -1756,6 +1756,8 @@ class Support_Ticket_System {
                 echo '<h4>' . esc_html($license['product']) . '</h4>';
                 echo '<div class="support-ticket-license-key">' . esc_html($license['key']) . '</div>';
                 echo '<div class="support-ticket-report-button-container">';
+                echo '<h3>' . __('Need Help?', 'support-ticket-system') . '</h3>';
+                echo '<p>' . __('If you have any issues with your purchase, click the button below to report a problem:', 'support-ticket-system') . '</p>';
                 echo '<a href="' . esc_url(home_url('/submit-ticket/?order_id=' . $order_id . '&product=' . urlencode($license['product']))) . '" class="support-ticket-btn-report">';
                 echo '<span class="support-ticket-btn-icon">🔧</span>';
                 echo __('Report a Problem', 'support-ticket-system');
@@ -1765,6 +1767,8 @@ class Support_Ticket_System {
             }
         } else {
             echo '<div class="support-ticket-report-button-container">';
+            echo '<h3>' . __('Need Help?', 'support-ticket-system') . '</h3>';
+            echo '<p>' . __('If you have any issues with your purchase, click the button below to report a problem:', 'support-ticket-system') . '</p>';
             echo '<a href="' . esc_url(home_url('/submit-ticket/?order_id=' . $order_id)) . '" class="support-ticket-btn-report">';
             echo '<span class="support-ticket-btn-icon">🔧</span>';
             echo __('Report a Problem', 'support-ticket-system');
