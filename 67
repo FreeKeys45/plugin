@@ -1,0 +1,891 @@
+is this good now:
+ private function get_frontend_css() {
+        ob_start(); ?>
+        <style>
+        /* Woodmart Theme Compatibility */
+        .support-ticket-system-wrapper {
+            font-family: inherit !important;
+        }
+
+        .support-ticket-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            font-family: inherit;
+        }
+
+        .support-ticket-card {
+            background: #fff;
+            border-radius: 16px;
+            box-shadow: 0 8px 40px rgba(0,0,0,0.12);
+            padding: 50px;
+            margin-bottom: 30px;
+            border: 1px solid #e1e8ed;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .support-ticket-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 6px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+
+        .support-ticket-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 40px;
+            padding-bottom: 25px;
+            border-bottom: 3px solid #f0f4f8;
+        }
+
+        .support-ticket-title {
+            font-size: 36px;
+            font-weight: 800;
+            color: #1a365d;
+            margin: 0;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .support-ticket-btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 10px;
+            font-size: 14px;
+            font-weight: 700;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            text-align: center;
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .support-ticket-btn::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
+            transition: left 0.5s;
+        }
+
+        .support-ticket-btn:hover::before {
+            left: 100%;
+        }
+
+        .support-ticket-btn:hover {
+            background: linear-gradient(135deg, #764ba2 0%, #667eea 100%);
+            color: white;
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);
+        }
+
+        .support-ticket-btn:active {
+            transform: translateY(-1px);
+            box-shadow: 0 3px 10px rgba(102, 126, 234, 0.4);
+        }
+
+        .support-ticket-btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+
+        .support-ticket-btn-primary:hover {
+            background: linear-gradient(135deg, #764ba2 0%, #667eea 100%);
+        }
+
+        .support-ticket-btn-secondary {
+            background: linear-gradient(135deg, #718096 0%, #4a5568 100%);
+        }
+
+        .support-ticket-btn-secondary:hover {
+            background: linear-gradient(135deg, #4a5568 0%, #718096 100%);
+        }
+
+        .support-ticket-btn-danger {
+            background: linear-gradient(135deg, #e53e3e 0%, #c53030 100%);
+        }
+
+        .support-ticket-btn-danger:hover {
+            background: linear-gradient(135deg, #c53030 0%, #e53e3e 100%);
+        }
+
+        .support-ticket-btn-success {
+            background: linear-gradient(135deg, #38a169 0%, #2f855a 100%);
+        }
+
+        .support-ticket-btn-success:hover {
+            background: linear-gradient(135deg, #2f855a 0%, #38a169 100%);
+        }
+
+        .support-ticket-btn-block {
+            display: block;
+            width: 100%;
+            text-align: center;
+            justify-content: center;
+        }
+
+        .support-ticket-btn-report {
+            background: linear-gradient(135deg, #ed8936 0%, #dd6b20 100%);
+            color: white !important;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 10px;
+            font-weight: 700;
+            font-size: 14px;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            box-shadow: 0 4px 15px rgba(237, 137, 54, 0.4);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .support-ticket-btn-report::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
+            transition: left 0.5s;
+        }
+
+        .support-ticket-btn-report:hover::before {
+            left: 100%;
+        }
+
+        .support-ticket-btn-report:hover {
+            background: linear-gradient(135deg, #dd6b20 0%, #ed8936 100%);
+            color: white !important;
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(237, 137, 54, 0.5);
+            text-decoration: none;
+        }
+
+        .support-ticket-btn-report:active {
+            transform: translateY(-1px);
+            box-shadow: 0 3px 10px rgba(237, 137, 54, 0.4);
+        }
+
+        /* Need Help Section - Email Style for Dashboard */
+        .support-ticket-help-section-email {
+            background: linear-gradient(135deg, #fffaf0 0%, #feebc8 100%);
+            border: 2px solid #fbd38d;
+            border-radius: 12px;
+            padding: 30px;
+            margin: 30px 0;
+            text-align: center;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            font-family: inherit;
+        }
+
+        .support-ticket-help-section-email h3 {
+            color: #744210;
+            margin-bottom: 15px;
+            font-size: 24px;
+            font-weight: 700;
+            margin-top: 0;
+        }
+
+        .support-ticket-help-section-email p {
+            color: #744210;
+            margin-bottom: 20px;
+            font-size: 16px;
+            line-height: 1.6;
+        }
+
+        .support-ticket-btn-report-email {
+            background: linear-gradient(135deg, #ed8936 0%, #dd6b20 100%);
+            color: white !important;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 10px;
+            font-weight: 700;
+            font-size: 14px;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            box-shadow: 0 4px 15px rgba(237, 137, 54, 0.4);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .support-ticket-btn-report-email::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
+            transition: left 0.5s;
+        }
+
+        .support-ticket-btn-report-email:hover::before {
+            left: 100%;
+        }
+
+        .support-ticket-btn-report-email:hover {
+            background: linear-gradient(135deg, #dd6b20 0%, #ed8936 100%);
+            color: white !important;
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(237, 137, 54, 0.5);
+            text-decoration: none;
+        }
+
+        .support-ticket-btn-report-email:active {
+            transform: translateY(-1px);
+            box-shadow: 0 3px 10px rgba(237, 137, 54, 0.4);
+        }
+
+        .support-ticket-btn-icon {
+            font-size: 18px;
+            filter: drop-shadow(0 2px 4px rgba(0,0,0,0.2));
+        }
+
+        .support-ticket-report-button-container {
+            margin: 20px 0;
+            text-align: right;
+            padding: 20px 0;
+            border-top: 2px solid #e2e8f0;
+        }
+
+        .woocommerce-order-details .support-ticket-report-button-container {
+            margin-top: 25px;
+            padding-top: 20px;
+            border-top: 2px solid #e2e8f0;
+        }
+
+        .woocommerce-email .support-ticket-report-button-container {
+            text-align: center;
+            margin: 20px 0;
+            padding: 20px 0;
+            border-top: 2px solid #e2e8f0;
+        }
+
+        /* Woodmart theme compatibility */
+        .woocommerce-order-details .support-ticket-report-button-container {
+            text-align: right !important;
+        }
+
+        .support-ticket-license-section {
+            margin: 20px 0;
+            padding: 20px;
+            background: linear-gradient(135deg, #f7fafc 0%, #edf2f7 100%);
+            border-radius: 12px;
+            border-left: 4px solid #4299e1;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.08);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .support-ticket-license-section::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            right: 0;
+            width: 80px;
+            height: 80px;
+            background: linear-gradient(135deg, #4299e1 0%, #3182ce 100%);
+            opacity: 0.1;
+            border-radius: 0 0 0 80px;
+        }
+
+        .support-ticket-license-section h4 {
+            color: #2d3748;
+            margin-bottom: 15px;
+            font-size: 18px;
+            font-weight: 700;
+        }
+
+        .support-ticket-license-key {
+            font-family: 'Courier New', monospace;
+            font-size: 16px;
+            font-weight: 700;
+            color: #2b6cb0;
+            background: linear-gradient(135deg, #fff 0%, #f7fafc 100%);
+            padding: 12px 16px;
+            border-radius: 8px;
+            border: 2px dashed #bee3f8;
+            margin: 15px 0;
+            display: inline-block;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+
+        .support-ticket-form-group {
+            margin-bottom: 25px;
+        }
+
+        .support-ticket-form-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #2d3748;
+            font-size: 15px;
+        }
+
+        .support-ticket-form-control {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e2e8f0;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            background: #fff;
+            font-family: inherit;
+        }
+
+        .support-ticket-form-control:focus {
+            outline: none;
+            border-color: #4299e1;
+            box-shadow: 0 0 0 3px rgba(66, 153, 225, 0.15);
+            background: #f7fafc;
+            transform: translateY(-1px);
+        }
+
+        .support-ticket-form-control.error {
+            border-color: #e53e3e;
+            box-shadow: 0 0 0 3px rgba(229, 62, 62, 0.15);
+        }
+
+        .support-ticket-list {
+            background: #fff;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.12);
+            border: 1px solid #e1e8ed;
+        }
+
+        .support-ticket-item {
+            padding: 20px;
+            border-bottom: 1px solid #e2e8f0;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            background: #fff;
+        }
+
+        .support-ticket-item:hover {
+            background: linear-gradient(135deg, #f7fafc 0%, #edf2f7 100%);
+            transform: translateX(5px);
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        .support-ticket-item:last-child {
+            border-bottom: none;
+        }
+
+        .support-ticket-id {
+            font-weight: 700;
+            color: #4299e1;
+            min-width: 120px;
+            font-size: 16px;
+            background: #ebf8ff;
+            padding: 8px 12px;
+            border-radius: 6px;
+            text-align: center;
+        }
+
+        .support-ticket-product {
+            flex: 1;
+            font-weight: 600;
+            color: #2d3748;
+            font-size: 15px;
+            margin: 0 15px;
+        }
+
+        .support-ticket-agent {
+            color: #718096;
+            font-size: 14px;
+            margin-right: 15px;
+            background: #f7fafc;
+            padding: 6px 12px;
+            border-radius: 6px;
+            border: 1px solid #e2e8f0;
+        }
+
+        .support-ticket-agent strong {
+            color: #4a5568;
+        }
+
+        .support-ticket-status {
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 700;
+            margin-right: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.1);
+        }
+
+        .support-status-open { background: linear-gradient(135deg, #c6f6d5 0%, #9ae6b4 100%); color: #276749; border: 1px solid #9ae6b4; }
+        .support-status-pending { background: linear-gradient(135deg, #fef5e7 0%, #fbd38d 100%); color: #744210; border: 1px solid #fbd38d; }
+        .support-status-closed { background: linear-gradient(135deg, #fed7d7 0%, #feb2b2 100%); color: #9b2c2c; border: 1px solid #feb2b2; }
+
+        .support-ticket-priority {
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 700;
+            margin-right: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.1);
+        }
+
+        .support-priority-low { background: linear-gradient(135deg, #e2e8f0 0%, #cbd5e0 100%); color: #2d3748; border: 1px solid #cbd5e0; }
+        .support-priority-medium { background: linear-gradient(135deg, #fef5e7 0%, #fbd38d 100%); color: #744210; border: 1px solid #fbd38d; }
+        .support-priority-high { background: linear-gradient(135deg, #fed7d7 0%, #feb2b2 100%); color: #9b2c2c; border: 1px solid #feb2b2; }
+        .support-priority-urgent { background: linear-gradient(135deg, #e9d8fd 0%, #d6bcfa 100%); color: #553c9a; border: 1px solid #d6bcfa; }
+
+        .support-ticket-date {
+            color: #718096;
+            font-size: 14px;
+            margin-right: 15px;
+            background: #f7fafc;
+            padding: 6px 12px;
+            border-radius: 6px;
+            border: 1px solid #e2e8f0;
+        }
+
+        .support-ticket-alert {
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 25px;
+            border: 2px solid;
+            font-weight: 600;
+            font-size: 14px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+
+        .support-ticket-alert-success {
+            background: linear-gradient(135deg, #f0fff4 0%, #c6f6d5 100%);
+            color: #276749;
+            border-color: #9ae6b4;
+        }
+
+        .support-ticket-alert-error {
+            background: linear-gradient(135deg, #fff5f5 0%, #fed7d7 100%);
+            color: #c53030;
+            border-color: #fc8181;
+        }
+
+        .support-ticket-alert-info {
+            background: linear-gradient(135deg, #ebf8ff 0%, #bee3f8 100%);
+            color: #2b6cb0;
+            border-color: #90cdf4;
+        }
+
+        .support-ticket-alert-warning {
+            background: linear-gradient(135deg, #fffaf0 0%, #feebc8 100%);
+            color: #744210;
+            border-color: #fbd38d;
+        }
+
+        .support-ticket-loading {
+            display: inline-block;
+            width: 18px;
+            height: 18px;
+            border: 2px solid #f7fafc;
+            border-top: 2px solid #4299e1;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        .support-ticket-order-info {
+            background: linear-gradient(135deg, #ebf8ff 0%, #bee3f8 100%);
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 25px;
+            border-left: 4px solid #4299e1;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+        }
+
+        .support-ticket-message {
+            background: #fff;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 25px;
+            border: 1px solid #e2e8f0;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+            position: relative;
+        }
+
+        .support-ticket-message::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 4px;
+            height: 100%;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 10px 0 0 10px;
+        }
+
+        .support-ticket-message-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid #e2e8f0;
+        }
+
+        .support-ticket-message-author {
+            font-weight: 700;
+            color: #2d3748;
+            font-size: 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .support-ticket-message-agent {
+            color: #4299e1;
+            font-weight: 600;
+            background: #ebf8ff;
+            padding: 3px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+            border: 1px solid #bee3f8;
+        }
+
+        .support-ticket-message-date {
+            color: #718096;
+            font-size: 14px;
+            background: #f7fafc;
+            padding: 4px 8px;
+            border-radius: 6px;
+        }
+
+        .support-ticket-message-content {
+            margin-top: 15px;
+            line-height: 1.6;
+            font-size: 14px;
+        }
+
+        .support-ticket-attachment {
+            display: inline-flex;
+            align-items: center;
+            margin-right: 15px;
+            margin-bottom: 15px;
+            padding: 8px 12px;
+            background: linear-gradient(135deg, #f7fafc 0%, #edf2f7 100%);
+            border-radius: 6px;
+            color: #4a5568;
+            text-decoration: none;
+            font-size: 13px;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            border: 1px solid #e2e8f0;
+            font-weight: 600;
+        }
+
+        .support-ticket-attachment:hover {
+            background: linear-gradient(135deg, #edf2f7 0%, #e2e8f0 100%);
+            color: #2d3748;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            border-color: #cbd5e0;
+        }
+
+        .support-ticket-file-upload {
+            margin-top: 15px;
+        }
+
+        .support-ticket-file-list {
+            margin-top: 15px;
+        }
+
+        .support-ticket-file-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 15px;
+            background: linear-gradient(135deg, #f7fafc 0%, #edf2f7 100%);
+            border-radius: 6px;
+            margin-bottom: 8px;
+            border: 1px solid #e2e8f0;
+            transition: all 0.3s ease;
+        }
+
+        .support-ticket-file-item:hover {
+            background: linear-gradient(135deg, #edf2f7 0%, #e2e8f0 100%);
+            transform: translateX(3px);
+        }
+
+        .support-ticket-file-name {
+            flex: 1;
+            margin-right: 15px;
+            font-weight: 600;
+            color: #4a5568;
+        }
+
+        .support-ticket-file-remove {
+            color: #e53e3e;
+            cursor: pointer;
+            font-weight: bold;
+            font-size: 16px;
+            transition: color 0.3s ease;
+            background: #fff5f5;
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid #fed7d7;
+        }
+
+        .support-ticket-file-remove:hover {
+            color: #c53030;
+            background: #fed7d7;
+        }
+
+        .support-ticket-no-tickets {
+            text-align: center;
+            padding: 60px 30px;
+            color: #718096;
+        }
+
+        .support-ticket-no-tickets p {
+            font-size: 18px;
+            margin-bottom: 20px;
+            font-weight: 600;
+        }
+
+        .support-ticket-reply-form {
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 2px solid #e2e8f0;
+        }
+
+        .support-ticket-order-section {
+            margin-top: 20px;
+            padding: 20px;
+            background: #f7fafc;
+            border-radius: 10px;
+            border: 1px solid #e2e8f0;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+        }
+
+        .support-ticket-assigned-agent {
+            background: linear-gradient(135deg, #f0fff4 0%, #c6f6d5 100%);
+            padding: 15px;
+            border-radius: 8px;
+            margin: 15px 0;
+            border-left: 4px solid #38a169;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        }
+
+        .support-ticket-close-section {
+            text-align: center;
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 2px solid #e2e8f0;
+        }
+
+        .support-ticket-license-issue {
+            background: linear-gradient(135deg, #fffaf0 0%, #feebc8 100%);
+            border: 2px solid #fbd38d;
+            border-radius: 10px;
+            padding: 20px;
+            margin: 15px 0;
+        }
+
+        .support-ticket-license-status {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 12px;
+            border-radius: 15px;
+            font-weight: 600;
+            font-size: 12px;
+            margin-left: 8px;
+        }
+
+        .license-status-valid { background: #c6f6d5; color: #276749; }
+        .license-status-invalid { background: #fed7d7; color: #c53030; }
+        .license-status-revoked { background: #e2e8f0; color: #4a5568; }
+        .license-status-duplicate { background: #fef5e7; color: #744210; }
+
+        /* Create a ticket Title Styling */
+        .support-ticket-submit-title {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 25px;
+            border-radius: 12px;
+            text-align: center;
+            margin-bottom: 30px;
+            box-shadow: 0 6px 25px rgba(102, 126, 234, 0.3);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .support-ticket-submit-title::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: linear-gradient(45deg, transparent 30%, rgba(255,255,255,0.1) 50%, transparent 70%);
+            animation: shimmer 3s infinite linear;
+        }
+
+        .support-ticket-submit-title h1 {
+            margin: 0;
+            font-size: 32px;
+            font-weight: 800;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.3);
+            position: relative;
+            z-index: 1;
+        }
+
+        @keyframes shimmer {
+            0% { transform: translateX(-100%); }
+            100% { transform: translateX(100%); }
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        @media (max-width: 768px) {
+            .support-ticket-header {
+                flex-direction: column;
+                gap: 20px;
+                align-items: flex-start;
+            }
+           
+            .support-ticket-item {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 15px;
+            }
+           
+            .support-ticket-id, .support-ticket-status, .support-ticket-priority, .support-ticket-date {
+                margin-bottom: 8px;
+            }
+
+            .support-ticket-card {
+                padding: 30px;
+            }
+
+            .support-ticket-title {
+                font-size: 28px;
+            }
+
+            .support-ticket-submit-title h1 {
+                font-size: 24px;
+            }
+
+            .support-ticket-help-section-email {
+                padding: 20px;
+            }
+
+            .support-ticket-help-section-email h3 {
+                font-size: 20px;
+            }
+        }
+
+        /* Woodmart theme specific fixes */
+        .woocommerce-order-details .support-ticket-report-button-container a {
+            text-decoration: none !important;
+        }
+
+        .woocommerce-order-details .support-ticket-license-section {
+            margin: 20px 0;
+        }
+
+        /* Email specific styles */
+        .woocommerce-email-customer-details .support-ticket-report-button-container {
+            text-align: center !important;
+            margin: 20px 0 !important;
+        }
+
+        /* Woodmart container compatibility */
+        .woodmart-container .support-ticket-container {
+            max-width: 100% !important;
+            padding: 0 !important;
+        }
+
+        .woodmart-container .support-ticket-card {
+            margin: 0 0 30px 0 !important;
+        }
+
+        /* Ensure compatibility with Woodmart's grid system */
+        @media (min-width: 1025px) {
+            .woodmart-container .support-ticket-container {
+                padding: 0 15px !important;
+            }
+        }
+        </style>
+        <?php
+/* Email-style "Need Help?" block for dashboard and thankyou page */
+.support-ticket-help-section-email {
+  background: linear-gradient(135deg,#fffaf0 0%,#feebc8 100%);
+  border: 1px solid #f6d8a3;
+  border-radius: 12px;
+  padding: 24px;
+  margin: 24px 0;
+  text-align: center;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.06);
+}
+.support-ticket-help-section-email h3 {
+  margin: 0 0 10px;
+  font-size: 20px;
+  color: #5b3a21;
+  font-weight: 700;
+}
+.support-ticket-help-section-email p {
+  margin: 0 0 16px;
+  color: #6b4b32;
+  font-size: 14px;
+}
+.support-ticket-btn-report-email {
+  display:inline-block;
+  background: linear-gradient(135deg,#ed8936 0%,#dd6b20 100%);
+  color:#fff !important;
+  padding:10px 18px;
+  border-radius:8px;
+  font-weight:700;
+  text-transform:uppercase;
+  text-decoration:none;
+  box-shadow: 0 6px 12px rgba(221,107,32,0.18);
+}
+.support-ticket-btn-report-email:hover {
+  background: linear-gradient(135deg,#dd6b20 0%,#c05621 100%);
+  text-decoration:none;
+}
+.support-ticket-btn-icon { margin-right:8px; }
+
+        return ob_get_clean();
