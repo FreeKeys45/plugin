@@ -1,0 +1,2919 @@
+<?php
+/**
+ * Plugin Name: Support Ticket System
+ * Plugin URI: https://yourwebsite.com
+ * Description: Advanced customer support system with WooCommerce integration
+ * Version: 1.1.1
+ * Author: Your Company
+ * Text Domain: support-ticket-system
+ * Requires PHP: 7.4
+ */
+
+// Prevent direct access
+if (!defined('ABSPATH')) {
+    exit;
+}
+
+class Support_Ticket_System {
+   
+    private static $instance = null;
+   
+    public static function get_instance() {
+        if (self::$instance === null) {
+            self::$instance = new self();
+        }
+        return self::$instance;
+    }
+   
+    public function __construct() {
+        add_action('init', array($this, 'init'));
+        register_activation_hook(__FILE__, array($this, 'activate'));
+        register_deactivation_hook(__FILE__, array($this, 'deactivate'));
+       
+        // Load text domain for translations
+        add_action('plugins_loaded', array($this, 'load_textdomain'));
+    }
+   
+    public function load_textdomain() {
+        load_plugin_textdomain('support-ticket-system', false, dirname(plugin_basename(__FILE__)) . '/languages');
+    }
+   
+    public function init() {
+        $this->register_post_type();
+        $this->register_taxonomies();
+        $this->add_roles();
+        $this->init_hooks();
+        $this->add_my_tickets_endpoint();
+        $this->create_support_pages();
+    }
+   
+    private function init_hooks() {
+        // Shortcodes
+        add_shortcode('support_ticket_form', array($this, 'support_form_shortcode'));
+        add_shortcode('support_ticket_dashboard', array($this, 'support_dashboard_shortcode'));
+        add_shortcode('support_ticket_view', array($this, 'ticket_view_shortcode'));
+       
+        // Scripts and styles
+        add_action('wp_enqueue_scripts', array($this, 'enqueue_scripts'));
+       
+        // AJAX handlers
+        add_action('wp_ajax_support_submit_ticket', array($this, 'ajax_submit_ticket'));
+        add_action('wp_ajax_nopriv_support_submit_ticket', array($this, 'ajax_submit_ticket'));
+        add_action('wp_ajax_support_submit_reply', array($this, 'ajax_submit_reply'));
+        add_action('wp_ajax_nopriv_support_submit_reply', array($this, 'ajax_submit_reply'));
+        add_action('wp_ajax_support_close_ticket', array($this, 'ajax_close_ticket'));
+        add_action('wp_ajax_support_assign_agent', array($this, 'ajax_assign_agent'));
+       
+        // WooCommerce integration - only if WooCommerce is active
+        if (class_exists('WooCommerce')) {
+            add_action('woocommerce_order_details_after_order_table', array($this, 'add_report_problem_button'));
+            add_action('woocommerce_email_after_order_table', array($this, 'add_report_button_to_email'), 10, 4);
+            add_filter('woocommerce_account_menu_items', array($this, 'add_my_tickets_menu_item'));
+            add_action('woocommerce_account_my-tickets_endpoint', array($this, 'my_tickets_content'));
+            add_action('woocommerce_thankyou', array($this, 'add_report_problem_button'), 20);
+
+        }
+
+        // Admin hooks
+        add_action('admin_menu', array($this, 'add_support_agents_menu'));
+        add_action('admin_init', array($this, 'handle_agent_management'));
+        
+        // Force create pages on init
+        add_action('wp_loaded', array($this, 'force_create_pages'));
+    }
+
+    public function force_create_pages() {
+        if (!get_option('support_ticket_pages_created_v3')) {
+            $this->create_support_pages();
+            update_option('support_ticket_pages_created_v3', true);
+        }
+    }
+
+    // Add support agents management menu
+    public function add_support_agents_menu() {
+        add_users_page(
+            __('Support Agents', 'support-ticket-system'),
+            __('Support Agents', 'support-ticket-system'),
+            'manage_options',
+            'support-agents',
+            array($this, 'support_agents_page')
+        );
+    }
+
+    public function support_agents_page() {
+        // Handle agent creation
+        if (isset($_POST['create_agent']) && check_admin_referer('create_support_agent')) {
+            $this->create_support_agent();
+        }
+
+        $users = get_users(array(
+            'role__in' => array('administrator', 'editor', 'support_agent'),
+            'fields' => array('ID', 'display_name', 'user_email', 'roles')
+        ));
+       
+        $agents = array();
+        foreach ($users as $user) {
+            if (in_array('administrator', $user->roles) || in_array('editor', $user->roles) || in_array('support_agent', $user->roles)) {
+                $agents[] = $user;
+            }
+        }
+        ?>
+        <div class="wrap">
+            <h1><?php _e('Support Agents Management', 'support-ticket-system'); ?></h1>
+           
+            <?php if (isset($_GET['message'])): ?>
+                <div class="notice notice-<?php echo esc_attr($_GET['type'] ?? 'success'); ?> is-dismissible">
+                    <p><?php echo esc_html($_GET['message']); ?></p>
+                </div>
+            <?php endif; ?>
+           
+            <div class="card">
+                <h2><?php _e('Create New Support Agent', 'support-ticket-system'); ?></h2>
+                <form method="post" action="">
+                    <?php wp_nonce_field('create_support_agent'); ?>
+                    <table class="form-table">
+                        <tr>
+                            <th scope="row"><label for="agent_username"><?php _e('Username', 'support-ticket-system'); ?> *</label></th>
+                            <td><input type="text" name="agent_username" id="agent_username" required class="regular-text"></td>
+                        </tr>
+                        <tr>
+                            <th scope="row"><label for="agent_email"><?php _e('Email', 'support-ticket-system'); ?> *</label></th>
+                            <td><input type="email" name="agent_email" id="agent_email" required class="regular-text"></td>
+                        </tr>
+                        <tr>
+                            <th scope="row"><label for="agent_first_name"><?php _e('First Name', 'support-ticket-system'); ?></label></th>
+                            <td><input type="text" name="agent_first_name" id="agent_first_name" class="regular-text"></td>
+                        </tr>
+                        <tr>
+                            <th scope="row"><label for="agent_last_name"><?php _e('Last Name', 'support-ticket-system'); ?></label></th>
+                            <td><input type="text" name="agent_last_name" id="agent_last_name" class="regular-text"></td>
+                        </tr>
+                        <tr>
+                            <th scope="row"><label for="agent_password"><?php _e('Password', 'support-ticket-system'); ?> *</label></th>
+                            <td>
+                                <input type="password" name="agent_password" id="agent_password" required class="regular-text">
+                                <p class="description"><?php _e('Set a strong password for the new agent.', 'support-ticket-system'); ?></p>
+                            </td>
+                        </tr>
+                    </table>
+                    <?php submit_button(__('Create Support Agent', 'support-ticket-system'), 'primary', 'create_agent'); ?>
+                </form>
+            </div>
+
+            <div class="card" style="margin-top: 20px;">
+                <h2><?php _e('Available Support Agents', 'support-ticket-system'); ?></h2>
+                <table class="wp-list-table widefat fixed striped">
+                    <thead>
+                        <tr>
+                            <th><?php _e('Name', 'support-ticket-system'); ?></th>
+                            <th><?php _e('Email', 'support-ticket-system'); ?></th>
+                            <th><?php _e('Role', 'support-ticket-system'); ?></th>
+                            <th><?php _e('Assigned Tickets', 'support-ticket-system'); ?></th>
+                            <th><?php _e('Actions', 'support-ticket-system'); ?></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php if (empty($agents)): ?>
+                            <tr>
+                                <td colspan="5"><?php _e('No support agents found.', 'support-ticket-system'); ?></td>
+                            </tr>
+                        <?php else: ?>
+                            <?php foreach ($agents as $agent):
+                                $assigned_tickets = $this->get_agent_ticket_count($agent->ID);
+                                $role_names = array_map(function($role) {
+                                    return ucfirst($role);
+                                }, $agent->roles);
+                            ?>
+                                <tr>
+                                    <td><?php echo esc_html($agent->display_name); ?></td>
+                                    <td><?php echo esc_html($agent->user_email); ?></td>
+                                    <td><?php echo implode(', ', $role_names); ?></td>
+                                    <td><?php echo $assigned_tickets; ?></td>
+                                    <td>
+                                        <a href="<?php echo admin_url('edit.php?post_type=support_ticket&assigned_agent=' . $agent->ID); ?>" class="button">
+                                            <?php _e('View Tickets', 'support-ticket-system'); ?>
+                                        </a>
+                                        <a href="<?php echo admin_url('user-edit.php?user_id=' . $agent->ID); ?>" class="button">
+                                            <?php _e('Edit User', 'support-ticket-system'); ?>
+                                        </a>
+                                    </td>
+                                </tr>
+                            <?php endforeach; ?>
+                        <?php endif; ?>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        <?php
+    }
+
+    private function create_support_agent() {
+        if (!current_user_can('create_users')) {
+            wp_die(__('You do not have permission to create users.', 'support-ticket-system'));
+        }
+
+        $username = sanitize_user($_POST['agent_username']);
+        $email = sanitize_email($_POST['agent_email']);
+        $password = $_POST['agent_password'];
+        $first_name = sanitize_text_field($_POST['agent_first_name']);
+        $last_name = sanitize_text_field($_POST['agent_last_name']);
+
+        // Check if username already exists
+        if (username_exists($username)) {
+            wp_redirect(admin_url('users.php?page=support-agents&message=' . urlencode(__('Username already exists.', 'support-ticket-system')) . '&type=error'));
+            exit;
+        }
+
+        // Check if email already exists
+        if (email_exists($email)) {
+            wp_redirect(admin_url('users.php?page=support-agents&message=' . urlencode(__('Email already exists.', 'support-ticket-system')) . '&type=error'));
+            exit;
+        }
+
+        // Create the user
+        $user_id = wp_create_user($username, $password, $email);
+
+        if (is_wp_error($user_id)) {
+            wp_redirect(admin_url('users.php?page=support-agents&message=' . urlencode($user_id->get_error_message()) . '&type=error'));
+            exit;
+        }
+
+        // Update user details
+        wp_update_user(array(
+            'ID' => $user_id,
+            'first_name' => $first_name,
+            'last_name' => $last_name,
+            'display_name' => $first_name . ' ' . $last_name,
+            'role' => 'support_agent'
+        ));
+
+        wp_redirect(admin_url('users.php?page=support-agents&message=' . urlencode(__('Support agent created successfully!', 'support-ticket-system')) . '&type=success'));
+        exit;
+    }
+
+    private function get_agent_ticket_count($agent_id) {
+        $tickets = get_posts(array(
+            'post_type' => 'support_ticket',
+            'meta_query' => array(
+                array(
+                    'key' => 'assigned_agent',
+                    'value' => $agent_id,
+                    'compare' => '='
+                )
+            ),
+            'posts_per_page' => -1,
+            'fields' => 'ids'
+        ));
+       
+        return count($tickets);
+    }
+
+    public function handle_agent_management() {
+        if (!current_user_can('manage_options')) {
+            return;
+        }
+       
+        // Handle agent assignment from admin
+        if (isset($_POST['assign_agent_nonce']) && wp_verify_nonce($_POST['assign_agent_nonce'], 'assign_agent')) {
+            $ticket_id = intval($_POST['ticket_id']);
+            $agent_id = intval($_POST['agent_id']);
+           
+            if ($ticket_id && $agent_id) {
+                update_post_meta($ticket_id, 'assigned_agent', $agent_id);
+                update_post_meta($ticket_id, 'last_update', current_time('mysql'));
+               
+                wp_redirect(admin_url('users.php?page=support-agents&message=' . urlencode(__('Agent assigned successfully!', 'support-ticket-system')) . '&type=success'));
+                exit;
+            }
+        }
+    }
+
+    // Create necessary pages on activation
+    public function create_support_pages() {
+        $pages = array(
+            'submit-ticket' => array(
+                'title' => 'Create a Ticket',
+                'content' => '[support_ticket_form]',
+                'parent' => 0
+            ),
+            'my-tickets' => array(
+                'title' => 'My Tickets',
+                'content' => '[support_ticket_dashboard]',
+                'parent' => 0
+            ),
+            'ticket-view' => array(
+                'title' => 'View Ticket',
+                'content' => '[support_ticket_view]',
+                'parent' => 0
+            )
+        );
+
+        foreach ($pages as $slug => $page) {
+            $existing_page = get_page_by_path($slug);
+            if (!$existing_page) {
+                $page_id = wp_insert_post(array(
+                    'post_title' => $page['title'],
+                    'post_name' => $slug,
+                    'post_content' => $page['content'],
+                    'post_status' => 'publish',
+                    'post_type' => 'page',
+                    'post_parent' => $page['parent']
+                ));
+
+                if ($page_id && !is_wp_error($page_id)) {
+                    error_log("Support Ticket System: Created page - {$page['title']} (ID: $page_id)");
+                }
+            } else {
+                // Update existing page content
+                wp_update_post(array(
+                    'ID' => $existing_page->ID,
+                    'post_content' => $page['content']
+                ));
+                error_log("Support Ticket System: Updated page - {$page['title']}");
+            }
+        }
+
+        flush_rewrite_rules();
+    }
+
+    // Add My Tickets endpoint
+    public function add_my_tickets_endpoint() {
+        add_rewrite_endpoint('my-tickets', EP_ROOT | EP_PAGES);
+        flush_rewrite_rules();
+    }
+   
+    public function activate() {
+        $this->register_post_type();
+        $this->register_taxonomies();
+        $this->add_roles();
+        $this->create_support_pages();
+        flush_rewrite_rules();
+       
+        // Create upload directory
+        $upload_dir = wp_upload_dir();
+        $support_ticket_dir = $upload_dir['basedir'] . '/support-tickets';
+        if (!file_exists($support_ticket_dir)) {
+            wp_mkdir_p($support_ticket_dir);
+        }
+       
+        // Add .htaccess for security
+        $htaccess_content = "Order deny,allow\nDeny from all\n<Files ~ \"\\.(jpg|jpeg|png|pdf|txt|mp4|mov|avi|webm)$\">\nOrder allow,deny\nAllow from all\n</Files>";
+        @file_put_contents($support_ticket_dir . '/.htaccess', $htaccess_content);
+    }
+   
+    public function deactivate() {
+        flush_rewrite_rules();
+    }
+   
+    private function register_post_type() {
+        // Register support ticket post type
+        $ticket_args = array(
+            'labels' => array(
+                'name' => __('Support Tickets', 'support-ticket-system'),
+                'singular_name' => __('Support Ticket', 'support-ticket-system'),
+                'menu_name' => __('Support Tickets', 'support-ticket-system'),
+                'all_items' => __('All Tickets', 'support-ticket-system'),
+                'add_new' => __('Add New', 'support-ticket-system'),
+                'add_new_item' => __('Add New Ticket', 'support-ticket-system'),
+                'edit_item' => __('Edit Ticket', 'support-ticket-system'),
+                'new_item' => __('New Ticket', 'support-ticket-system'),
+                'view_item' => __('View Ticket', 'support-ticket-system'),
+                'search_items' => __('Search Tickets', 'support-ticket-system'),
+                'not_found' => __('No tickets found', 'support-ticket-system'),
+                'not_found_in_trash' => __('No tickets found in Trash', 'support-ticket-system'),
+            ),
+            'public' => false,
+            'show_ui' => true,
+            'show_in_menu' => true,
+            'query_var' => false,
+            'rewrite' => false,
+            'capability_type' => 'post',
+            'capabilities' => array(
+                'create_posts' => false,
+            ),
+            'map_meta_cap' => true,
+            'hierarchical' => false,
+            'menu_position' => 25,
+            'menu_icon' => 'dashicons-sos',
+            'supports' => array('title', 'editor', 'author'),
+            'show_in_rest' => false,
+        );
+       
+        register_post_type('support_ticket', $ticket_args);
+       
+        // Register support reply post type
+        $reply_args = array(
+            'labels' => array(
+                'name' => __('Support Replies', 'support-ticket-system'),
+                'singular_name' => __('Support Reply', 'support-ticket-system'),
+            ),
+            'public' => false,
+            'show_ui' => false,
+            'query_var' => false,
+            'rewrite' => false,
+            'capability_type' => 'post',
+            'hierarchical' => false,
+            'supports' => array('editor', 'author'),
+            'show_in_rest' => false,
+        );
+       
+        register_post_type('support_ticket_reply', $reply_args);
+    }
+   
+    private function register_taxonomies() {
+        // Status taxonomy
+        register_taxonomy('ticket_status', 'support_ticket', array(
+            'labels' => array(
+                'name' => __('Statuses', 'support-ticket-system'),
+                'singular_name' => __('Status', 'support-ticket-system'),
+            ),
+            'hierarchical' => true,
+            'show_ui' => true,
+            'show_admin_column' => true,
+            'query_var' => false,
+            'rewrite' => false,
+            'public' => false,
+        ));
+       
+        // Priority taxonomy
+        register_taxonomy('ticket_priority', 'support_ticket', array(
+            'labels' => array(
+                'name' => __('Priorities', 'support-ticket-system'),
+                'singular_name' => __('Priority', 'support-ticket-system'),
+            ),
+            'hierarchical' => true,
+            'show_ui' => true,
+            'show_admin_column' => true,
+            'query_var' => false,
+            'rewrite' => false,
+            'public' => false,
+        ));
+       
+        // Create default terms
+        $this->create_default_terms();
+    }
+   
+    private function create_default_terms() {
+        $status_terms = array(
+            'open' => __('Open', 'support-ticket-system'),
+            'pending' => __('Pending', 'support-ticket-system'),
+            'closed' => __('Closed', 'support-ticket-system')
+        );
+       
+        foreach ($status_terms as $slug => $name) {
+            if (!term_exists($slug, 'ticket_status')) {
+                wp_insert_term($name, 'ticket_status', array('slug' => $slug));
+            }
+        }
+       
+        $priority_terms = array(
+            'low' => __('Low', 'support-ticket-system'),
+            'medium' => __('Medium', 'support-ticket-system'),
+            'high' => __('High', 'support-ticket-system'),
+            'urgent' => __('Urgent', 'support-ticket-system')
+        );
+       
+        foreach ($priority_terms as $slug => $name) {
+            if (!term_exists($slug, 'ticket_priority')) {
+                wp_insert_term($name, 'ticket_priority', array('slug' => $slug));
+            }
+        }
+    }
+   
+    private function add_roles() {
+        // Add Support Agent role
+        if (!get_role('support_agent')) {
+            add_role('support_agent', __('Support Agent', 'support-ticket-system'), array(
+                'read' => true,
+                'read_support_tickets' => true,
+                'edit_support_tickets' => true,
+                'edit_others_support_tickets' => true,
+                'edit_published_support_tickets' => true,
+                'delete_support_tickets' => false,
+            ));
+        }
+       
+        // Add capabilities to existing roles
+        $roles_to_modify = array('administrator', 'editor', 'support_agent');
+       
+        foreach ($roles_to_modify as $role_name) {
+            $role = get_role($role_name);
+            if ($role) {
+                $role->add_cap('read_support_ticket');
+                $role->add_cap('read_support_tickets');
+                $role->add_cap('edit_support_ticket');
+                $role->add_cap('edit_support_tickets');
+                $role->add_cap('edit_others_support_tickets');
+                $role->add_cap('edit_published_support_tickets');
+               
+                if ($role_name === 'administrator') {
+                    $role->add_cap('delete_support_tickets');
+                    $role->add_cap('delete_support_ticket');
+                    $role->add_cap('delete_others_support_tickets');
+                    $role->add_cap('delete_published_support_tickets');
+                }
+            }
+        }
+    }
+
+    // Add My Tickets menu to WooCommerce account
+    public function add_my_tickets_menu_item($items) {
+        $new_items = array();
+       
+        foreach ($items as $key => $value) {
+            $new_items[$key] = $value;
+            if ($key === 'orders') {
+                $new_items['my-tickets'] = __('My Tickets', 'support-ticket-system');
+            }
+        }
+       
+        return $new_items;
+    }
+
+    public function my_tickets_content() {
+        echo do_shortcode('[support_ticket_dashboard]');
+    }
+   
+    public function enqueue_scripts() {
+    global $post;
+
+    $is_wc_account_page = function_exists('is_account_page') && is_account_page();
+    $is_wc_checkout = function_exists('is_checkout') && is_checkout();
+    $is_wc_thankyou = function_exists('is_order_received_page') && is_order_received_page();
+    $has_shortcode = is_a($post, 'WP_Post') && (
+        has_shortcode($post->post_content, 'support_ticket_form') ||
+        has_shortcode($post->post_content, 'support_ticket_dashboard') ||
+        has_shortcode($post->post_content, 'support_ticket_view')
+    );
+
+    // Also load on any WooCommerce page as a fallback
+    $is_woocommerce = function_exists('is_woocommerce') && is_woocommerce();
+
+    if ($has_shortcode || $is_wc_account_page || $is_wc_checkout || $is_wc_thankyou || $is_woocommerce) {
+        wp_enqueue_script('jquery');
+
+        // Enqueue CSS as inline style
+        wp_register_style('support-ticket-css', false);
+        wp_enqueue_style('support-ticket-css');
+        wp_add_inline_style('support-ticket-css', $this->get_frontend_css());
+
+        // Enqueue JS
+        wp_register_script('support-ticket-js', false, array('jquery'), '1.0', true);
+        wp_enqueue_script('support-ticket-js');
+        wp_add_inline_script('support-ticket-js', $this->get_frontend_js());
+
+        wp_localize_script('support-ticket-js', 'support_ticket', array(
+            'ajax_url' => admin_url('admin-ajax.php'),
+            'nonce'    => wp_create_nonce('support_ticket_nonce'),
+            'strings'  => array(
+                'loading' => __('Loading...', 'support-ticket-system'),
+                'error' => __('An error occurred. Please try again.', 'support-ticket-system'),
+                'success' => __('Success!', 'support-ticket-system'),
+                'required_field' => __('This field is required.', 'support-ticket-system'),
+                'file_too_big' => __('File is too large. Maximum size is 50MB.', 'support-ticket-system'),
+                'invalid_file_type' => __('Invalid file type. Allowed types: png, jpg, jpeg, pdf, txt, mp4, mov, avi, webm', 'support-ticket-system'),
+            )
+        ));
+    }
+}
+   
+    private function get_frontend_css() {
+        ob_start(); ?>
+        <style>
+        /* Woodmart Theme Compatibility */
+        .support-ticket-system-wrapper {
+            font-family: inherit !important;
+        }
+
+        .support-ticket-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            font-family: inherit;
+        }
+
+        .support-ticket-card {
+            background: #fff;
+            border-radius: 16px;
+            box-shadow: 0 8px 40px rgba(0,0,0,0.12);
+            padding: 50px;
+            margin-bottom: 30px;
+            border: 1px solid #e1e8ed;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .support-ticket-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 6px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+
+        .support-ticket-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 40px;
+            padding-bottom: 25px;
+            border-bottom: 3px solid #f0f4f8;
+        }
+
+        .support-ticket-title {
+            font-size: 36px;
+            font-weight: 800;
+            color: #1a365d;
+            margin: 0;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .support-ticket-btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 10px;
+            font-size: 14px;
+            font-weight: 700;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            text-align: center;
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .support-ticket-btn::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
+            transition: left 0.5s;
+        }
+
+        .support-ticket-btn:hover::before {
+            left: 100%;
+        }
+
+        .support-ticket-btn:hover {
+            background: linear-gradient(135deg, #764ba2 0%, #667eea 100%);
+            color: white;
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);
+        }
+
+        .support-ticket-btn:active {
+            transform: translateY(-1px);
+            box-shadow: 0 3px 10px rgba(102, 126, 234, 0.4);
+        }
+
+        .support-ticket-btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+
+        .support-ticket-btn-primary:hover {
+            background: linear-gradient(135deg, #764ba2 0%, #667eea 100%);
+        }
+
+        .support-ticket-btn-secondary {
+            background: linear-gradient(135deg, #718096 0%, #4a5568 100%);
+        }
+
+        .support-ticket-btn-secondary:hover {
+            background: linear-gradient(135deg, #4a5568 0%, #718096 100%);
+        }
+
+        .support-ticket-btn-danger {
+            background: linear-gradient(135deg, #e53e3e 0%, #c53030 100%);
+        }
+
+        .support-ticket-btn-danger:hover {
+            background: linear-gradient(135deg, #c53030 0%, #e53e3e 100%);
+        }
+
+        .support-ticket-btn-success {
+            background: linear-gradient(135deg, #38a169 0%, #2f855a 100%);
+        }
+
+        .support-ticket-btn-success:hover {
+            background: linear-gradient(135deg, #2f855a 0%, #38a169 100%);
+        }
+
+        .support-ticket-btn-block {
+            display: block;
+            width: 100%;
+            text-align: center;
+            justify-content: center;
+        }
+
+        .support-ticket-btn-report {
+            background: linear-gradient(135deg, #ed8936 0%, #dd6b20 100%);
+            color: white !important;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 10px;
+            font-weight: 700;
+            font-size: 14px;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            box-shadow: 0 4px 15px rgba(237, 137, 54, 0.4);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .support-ticket-btn-report::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
+            transition: left 0.5s;
+        }
+
+        .support-ticket-btn-report:hover::before {
+            left: 100%;
+        }
+
+        .support-ticket-btn-report:hover {
+            background: linear-gradient(135deg, #dd6b20 0%, #ed8936 100%);
+            color: white !important;
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(237, 137, 54, 0.5);
+            text-decoration: none;
+        }
+
+        .support-ticket-btn-report:active {
+            transform: translateY(-1px);
+            box-shadow: 0 3px 10px rgba(237, 137, 54, 0.4);
+        }
+
+        /* Need Help Section - Email Style for Dashboard */
+        .support-ticket-help-section-email {
+            background: linear-gradient(135deg, #fffaf0 0%, #feebc8 100%);
+            border: 2px solid #fbd38d;
+            border-radius: 12px;
+            padding: 30px;
+            margin: 30px 0;
+            text-align: center;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            font-family: inherit;
+        }
+
+        .support-ticket-help-section-email h3 {
+            color: #744210;
+            margin-bottom: 15px;
+            font-size: 24px;
+            font-weight: 700;
+            margin-top: 0;
+        }
+
+        .support-ticket-help-section-email p {
+            color: #744210;
+            margin-bottom: 20px;
+            font-size: 16px;
+            line-height: 1.6;
+        }
+
+        .support-ticket-btn-report-email {
+            background: linear-gradient(135deg, #ed8936 0%, #dd6b20 100%);
+            color: white !important;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 10px;
+            font-weight: 700;
+            font-size: 14px;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            box-shadow: 0 4px 15px rgba(237, 137, 54, 0.4);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .support-ticket-btn-report-email::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
+            transition: left 0.5s;
+        }
+
+        .support-ticket-btn-report-email:hover::before {
+            left: 100%;
+        }
+
+        .support-ticket-btn-report-email:hover {
+            background: linear-gradient(135deg, #dd6b20 0%, #ed8936 100%);
+            color: white !important;
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(237, 137, 54, 0.5);
+            text-decoration: none;
+        }
+
+        .support-ticket-btn-report-email:active {
+            transform: translateY(-1px);
+            box-shadow: 0 3px 10px rgba(237, 137, 54, 0.4);
+        }
+
+        .support-ticket-btn-icon {
+            font-size: 18px;
+            filter: drop-shadow(0 2px 4px rgba(0,0,0,0.2));
+        }
+
+        .support-ticket-report-button-container {
+            margin: 20px 0;
+            text-align: right;
+            padding: 20px 0;
+            border-top: 2px solid #e2e8f0;
+        }
+
+        .woocommerce-order-details .support-ticket-report-button-container {
+            margin-top: 25px;
+            padding-top: 20px;
+            border-top: 2px solid #e2e8f0;
+        }
+
+        .woocommerce-email .support-ticket-report-button-container {
+            text-align: center;
+            margin: 20px 0;
+            padding: 20px 0;
+            border-top: 2px solid #e2e8f0;
+        }
+
+        /* Woodmart theme compatibility */
+        .woocommerce-order-details .support-ticket-report-button-container {
+            text-align: right !important;
+        }
+
+        .support-ticket-license-section {
+            margin: 20px 0;
+            padding: 20px;
+            background: linear-gradient(135deg, #f7fafc 0%, #edf2f7 100%);
+            border-radius: 12px;
+            border-left: 4px solid #4299e1;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.08);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .support-ticket-license-section::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            right: 0;
+            width: 80px;
+            height: 80px;
+            background: linear-gradient(135deg, #4299e1 0%, #3182ce 100%);
+            opacity: 0.1;
+            border-radius: 0 0 0 80px;
+        }
+
+        .support-ticket-license-section h4 {
+            color: #2d3748;
+            margin-bottom: 15px;
+            font-size: 18px;
+            font-weight: 700;
+        }
+
+        .support-ticket-license-key {
+            font-family: 'Courier New', monospace;
+            font-size: 16px;
+            font-weight: 700;
+            color: #2b6cb0;
+            background: linear-gradient(135deg, #fff 0%, #f7fafc 100%);
+            padding: 12px 16px;
+            border-radius: 8px;
+            border: 2px dashed #bee3f8;
+            margin: 15px 0;
+            display: inline-block;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+
+        .support-ticket-form-group {
+            margin-bottom: 25px;
+        }
+
+        .support-ticket-form-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #2d3748;
+            font-size: 15px;
+        }
+
+        .support-ticket-form-control {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e2e8f0;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            background: #fff;
+            font-family: inherit;
+        }
+
+        .support-ticket-form-control:focus {
+            outline: none;
+            border-color: #4299e1;
+            box-shadow: 0 0 0 3px rgba(66, 153, 225, 0.15);
+            background: #f7fafc;
+            transform: translateY(-1px);
+        }
+
+        .support-ticket-form-control.error {
+            border-color: #e53e3e;
+            box-shadow: 0 0 0 3px rgba(229, 62, 62, 0.15);
+        }
+
+        .support-ticket-list {
+            background: #fff;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.12);
+            border: 1px solid #e1e8ed;
+        }
+
+        .support-ticket-item {
+            padding: 20px;
+            border-bottom: 1px solid #e2e8f0;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            background: #fff;
+        }
+
+        .support-ticket-item:hover {
+            background: linear-gradient(135deg, #f7fafc 0%, #edf2f7 100%);
+            transform: translateX(5px);
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        .support-ticket-item:last-child {
+            border-bottom: none;
+        }
+
+        .support-ticket-id {
+            font-weight: 700;
+            color: #4299e1;
+            min-width: 120px;
+            font-size: 16px;
+            background: #ebf8ff;
+            padding: 8px 12px;
+            border-radius: 6px;
+            text-align: center;
+        }
+
+        .support-ticket-product {
+            flex: 1;
+            font-weight: 600;
+            color: #2d3748;
+            font-size: 15px;
+            margin: 0 15px;
+        }
+
+        .support-ticket-agent {
+            color: #718096;
+            font-size: 14px;
+            margin-right: 15px;
+            background: #f7fafc;
+            padding: 6px 12px;
+            border-radius: 6px;
+            border: 1px solid #e2e8f0;
+        }
+
+        .support-ticket-agent strong {
+            color: #4a5568;
+        }
+
+        .support-ticket-status {
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 700;
+            margin-right: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.1);
+        }
+
+        .support-status-open { background: linear-gradient(135deg, #c6f6d5 0%, #9ae6b4 100%); color: #276749; border: 1px solid #9ae6b4; }
+        .support-status-pending { background: linear-gradient(135deg, #fef5e7 0%, #fbd38d 100%); color: #744210; border: 1px solid #fbd38d; }
+        .support-status-closed { background: linear-gradient(135deg, #fed7d7 0%, #feb2b2 100%); color: #9b2c2c; border: 1px solid #feb2b2; }
+
+        .support-ticket-priority {
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 700;
+            margin-right: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.1);
+        }
+
+        .support-priority-low { background: linear-gradient(135deg, #e2e8f0 0%, #cbd5e0 100%); color: #2d3748; border: 1px solid #cbd5e0; }
+        .support-priority-medium { background: linear-gradient(135deg, #fef5e7 0%, #fbd38d 100%); color: #744210; border: 1px solid #fbd38d; }
+        .support-priority-high { background: linear-gradient(135deg, #fed7d7 0%, #feb2b2 100%); color: #9b2c2c; border: 1px solid #feb2b2; }
+        .support-priority-urgent { background: linear-gradient(135deg, #e9d8fd 0%, #d6bcfa 100%); color: #553c9a; border: 1px solid #d6bcfa; }
+
+        .support-ticket-date {
+            color: #718096;
+            font-size: 14px;
+            margin-right: 15px;
+            background: #f7fafc;
+            padding: 6px 12px;
+            border-radius: 6px;
+            border: 1px solid #e2e8f0;
+        }
+
+        .support-ticket-alert {
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 25px;
+            border: 2px solid;
+            font-weight: 600;
+            font-size: 14px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+
+        .support-ticket-alert-success {
+            background: linear-gradient(135deg, #f0fff4 0%, #c6f6d5 100%);
+            color: #276749;
+            border-color: #9ae6b4;
+        }
+
+        .support-ticket-alert-error {
+            background: linear-gradient(135deg, #fff5f5 0%, #fed7d7 100%);
+            color: #c53030;
+            border-color: #fc8181;
+        }
+
+        .support-ticket-alert-info {
+            background: linear-gradient(135deg, #ebf8ff 0%, #bee3f8 100%);
+            color: #2b6cb0;
+            border-color: #90cdf4;
+        }
+
+        .support-ticket-alert-warning {
+            background: linear-gradient(135deg, #fffaf0 0%, #feebc8 100%);
+            color: #744210;
+            border-color: #fbd38d;
+        }
+
+        .support-ticket-loading {
+            display: inline-block;
+            width: 18px;
+            height: 18px;
+            border: 2px solid #f7fafc;
+            border-top: 2px solid #4299e1;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        .support-ticket-order-info {
+            background: linear-gradient(135deg, #ebf8ff 0%, #bee3f8 100%);
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 25px;
+            border-left: 4px solid #4299e1;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+        }
+
+        .support-ticket-message {
+            background: #fff;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 25px;
+            border: 1px solid #e2e8f0;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+            position: relative;
+        }
+
+        .support-ticket-message::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 4px;
+            height: 100%;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 10px 0 0 10px;
+        }
+
+        .support-ticket-message-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid #e2e8f0;
+        }
+
+        .support-ticket-message-author {
+            font-weight: 700;
+            color: #2d3748;
+            font-size: 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .support-ticket-message-agent {
+            color: #4299e1;
+            font-weight: 600;
+            background: #ebf8ff;
+            padding: 3px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+            border: 1px solid #bee3f8;
+        }
+
+        .support-ticket-message-date {
+            color: #718096;
+            font-size: 14px;
+            background: #f7fafc;
+            padding: 4px 8px;
+            border-radius: 6px;
+        }
+
+        .support-ticket-message-content {
+            margin-top: 15px;
+            line-height: 1.6;
+            font-size: 14px;
+        }
+
+        .support-ticket-attachment {
+            display: inline-flex;
+            align-items: center;
+            margin-right: 15px;
+            margin-bottom: 15px;
+            padding: 8px 12px;
+            background: linear-gradient(135deg, #f7fafc 0%, #edf2f7 100%);
+            border-radius: 6px;
+            color: #4a5568;
+            text-decoration: none;
+            font-size: 13px;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            border: 1px solid #e2e8f0;
+            font-weight: 600;
+        }
+
+        .support-ticket-attachment:hover {
+            background: linear-gradient(135deg, #edf2f7 0%, #e2e8f0 100%);
+            color: #2d3748;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            border-color: #cbd5e0;
+        }
+
+        .support-ticket-file-upload {
+            margin-top: 15px;
+        }
+
+        .support-ticket-file-list {
+            margin-top: 15px;
+        }
+
+        .support-ticket-file-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 15px;
+            background: linear-gradient(135deg, #f7fafc 0%, #edf2f7 100%);
+            border-radius: 6px;
+            margin-bottom: 8px;
+            border: 1px solid #e2e8f0;
+            transition: all 0.3s ease;
+        }
+
+        .support-ticket-file-item:hover {
+            background: linear-gradient(135deg, #edf2f7 0%, #e2e8f0 100%);
+            transform: translateX(3px);
+        }
+
+        .support-ticket-file-name {
+            flex: 1;
+            margin-right: 15px;
+            font-weight: 600;
+            color: #4a5568;
+        }
+
+        .support-ticket-file-remove {
+            color: #e53e3e;
+            cursor: pointer;
+            font-weight: bold;
+            font-size: 16px;
+            transition: color 0.3s ease;
+            background: #fff5f5;
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid #fed7d7;
+        }
+
+        .support-ticket-file-remove:hover {
+            color: #c53030;
+            background: #fed7d7;
+        }
+
+        .support-ticket-no-tickets {
+            text-align: center;
+            padding: 60px 30px;
+            color: #718096;
+        }
+
+        .support-ticket-no-tickets p {
+            font-size: 18px;
+            margin-bottom: 20px;
+            font-weight: 600;
+        }
+
+        .support-ticket-reply-form {
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 2px solid #e2e8f0;
+        }
+
+        .support-ticket-order-section {
+            margin-top: 20px;
+            padding: 20px;
+            background: #f7fafc;
+            border-radius: 10px;
+            border: 1px solid #e2e8f0;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+        }
+
+        .support-ticket-assigned-agent {
+            background: linear-gradient(135deg, #f0fff4 0%, #c6f6d5 100%);
+            padding: 15px;
+            border-radius: 8px;
+            margin: 15px 0;
+            border-left: 4px solid #38a169;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        }
+
+        .support-ticket-close-section {
+            text-align: center;
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 2px solid #e2e8f0;
+        }
+
+        .support-ticket-license-issue {
+            background: linear-gradient(135deg, #fffaf0 0%, #feebc8 100%);
+            border: 2px solid #fbd38d;
+            border-radius: 10px;
+            padding: 20px;
+            margin: 15px 0;
+        }
+
+        .support-ticket-license-status {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 12px;
+            border-radius: 15px;
+            font-weight: 600;
+            font-size: 12px;
+            margin-left: 8px;
+        }
+
+        .license-status-valid { background: #c6f6d5; color: #276749; }
+        .license-status-invalid { background: #fed7d7; color: #c53030; }
+        .license-status-revoked { background: #e2e8f0; color: #4a5568; }
+        .license-status-duplicate { background: #fef5e7; color: #744210; }
+
+        /* Create a ticket Title Styling */
+        .support-ticket-submit-title {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 25px;
+            border-radius: 12px;
+            text-align: center;
+            margin-bottom: 30px;
+            box-shadow: 0 6px 25px rgba(102, 126, 234, 0.3);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .support-ticket-submit-title::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: linear-gradient(45deg, transparent 30%, rgba(255,255,255,0.1) 50%, transparent 70%);
+            animation: shimmer 3s infinite linear;
+        }
+
+        .support-ticket-submit-title h1 {
+            margin: 0;
+            font-size: 32px;
+            font-weight: 800;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.3);
+            position: relative;
+            z-index: 1;
+        }
+
+        @keyframes shimmer {
+            0% { transform: translateX(-100%); }
+            100% { transform: translateX(100%); }
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        @media (max-width: 768px) {
+            .support-ticket-header {
+                flex-direction: column;
+                gap: 20px;
+                align-items: flex-start;
+            }
+           
+            .support-ticket-item {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 15px;
+            }
+           
+            .support-ticket-id, .support-ticket-status, .support-ticket-priority, .support-ticket-date {
+                margin-bottom: 8px;
+            }
+
+            .support-ticket-card {
+                padding: 30px;
+            }
+
+            .support-ticket-title {
+                font-size: 28px;
+            }
+
+            .support-ticket-submit-title h1 {
+                font-size: 24px;
+            }
+
+            .support-ticket-help-section-email {
+                padding: 20px;
+            }
+
+            .support-ticket-help-section-email h3 {
+                font-size: 20px;
+            }
+        }
+
+        /* Woodmart theme specific fixes */
+        .woocommerce-order-details .support-ticket-report-button-container a {
+            text-decoration: none !important;
+        }
+
+        .woocommerce-order-details .support-ticket-license-section {
+            margin: 20px 0;
+        }
+
+        /* Email specific styles */
+        .woocommerce-email-customer-details .support-ticket-report-button-container {
+            text-align: center !important;
+            margin: 20px 0 !important;
+        }
+
+        /* Woodmart container compatibility */
+        .woodmart-container .support-ticket-container {
+            max-width: 100% !important;
+            padding: 0 !important;
+        }
+
+        .woodmart-container .support-ticket-card {
+            margin: 0 0 30px 0 !important;
+        }
+
+        /* Ensure compatibility with Woodmart's grid system */
+        @media (min-width: 1025px) {
+            .woodmart-container .support-ticket-container {
+                padding: 0 15px !important;
+            }
+        }
+        </style>
+        <?php
+/* Email-style "Need Help?" block for dashboard and thankyou page */
+.support-ticket-help-section-email {
+  background: linear-gradient(135deg,#fffaf0 0%,#feebc8 100%);
+  border: 1px solid #f6d8a3;
+  border-radius: 12px;
+  padding: 24px;
+  margin: 24px 0;
+  text-align: center;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.06);
+}
+.support-ticket-help-section-email h3 {
+  margin: 0 0 10px;
+  font-size: 20px;
+  color: #5b3a21;
+  font-weight: 700;
+}
+.support-ticket-help-section-email p {
+  margin: 0 0 16px;
+  color: #6b4b32;
+  font-size: 14px;
+}
+.support-ticket-btn-report-email {
+  display:inline-block;
+  background: linear-gradient(135deg,#ed8936 0%,#dd6b20 100%);
+  color:#fff !important;
+  padding:10px 18px;
+  border-radius:8px;
+  font-weight:700;
+  text-transform:uppercase;
+  text-decoration:none;
+  box-shadow: 0 6px 12px rgba(221,107,32,0.18);
+}
+.support-ticket-btn-report-email:hover {
+  background: linear-gradient(135deg,#dd6b20 0%,#c05621 100%);
+  text-decoration:none;
+}
+.support-ticket-btn-icon { margin-right:8px; }
+
+        return ob_get_clean();
+    }
+   
+    private function get_frontend_js() {
+        ob_start(); ?>
+        <script>
+        jQuery(document).ready(function($) {
+            // Ticket form submission
+            $('#support-ticket-form').on('submit', function(e) {
+                e.preventDefault();
+               
+                var form = $(this);
+                var submitBtn = form.find('button[type="submit"]');
+                var originalText = submitBtn.html();
+                var formData = new FormData(form[0]);
+               
+                // Validate required fields
+                var isValid = true;
+                form.find('.required').each(function() {
+                    if (!$(this).val()) {
+                        isValid = false;
+                        $(this).addClass('error');
+                    } else {
+                        $(this).removeClass('error');
+                    }
+                });
+               
+                if (!isValid) {
+                    $('#support-ticket-form-message').html('<div class="support-ticket-alert support-ticket-alert-error">' + support_ticket.strings.required_field + '</div>');
+                    return;
+                }
+               
+                // Validate file uploads
+                var fileInputs = form.find('input[type="file"]');
+                var validFiles = true;
+               
+                fileInputs.each(function() {
+                    var files = this.files;
+                    for (var i = 0; i < files.length; i++) {
+                        var file = files[i];
+                       
+                        // Check file size (50MB max)
+                        if (file.size > 50 * 1024 * 1024) {
+                            validFiles = false;
+                            $('#support-ticket-form-message').html('<div class="support-ticket-alert support-ticket-alert-error">' + support_ticket.strings.file_too_big + '</div>');
+                            return false;
+                        }
+                       
+                        // Check file type
+                        var allowedTypes = ['image/png', 'image/jpeg', 'image/jpg', 'application/pdf', 'text/plain', 'video/mp4', 'video/quicktime', 'video/x-msvideo', 'video/webm'];
+                        if (allowedTypes.indexOf(file.type) === -1) {
+                            validFiles = false;
+                            $('#support-ticket-form-message').html('<div class="support-ticket-alert support-ticket-alert-error">' + support_ticket.strings.invalid_file_type + '</div>');
+                            return false;
+                        }
+                    }
+                });
+               
+                if (!validFiles) {
+                    return;
+                }
+               
+                formData.append('action', 'support_submit_ticket');
+                formData.append('nonce', support_ticket.nonce);
+               
+                submitBtn.prop('disabled', true).html('<span class="support-ticket-loading"></span> ' + support_ticket.strings.loading);
+               
+                $.ajax({
+                    url: support_ticket.ajax_url,
+                    type: 'POST',
+                    data: formData,
+                    processData: false,
+                    contentType: false,
+                    success: function(response) {
+                        if (response.success) {
+                            $('#support-ticket-form-message').html('<div class="support-ticket-alert support-ticket-alert-success">' + response.data.message + '</div>');
+                            form[0].reset();
+                            $('.support-ticket-file-list').empty();
+                            if (response.data.redirect_url) {
+                                setTimeout(function() {
+                                    window.location.href = response.data.redirect_url;
+                                }, 2000);
+                            }
+                        } else {
+                            $('#support-ticket-form-message').html('<div class="support-ticket-alert support-ticket-alert-error">' + response.data.message + '</div>');
+                        }
+                    },
+                    error: function(xhr, status, error) {
+                        console.error('AJAX Error:', error);
+                        $('#support-ticket-form-message').html('<div class="support-ticket-alert support-ticket-alert-error">' + support_ticket.strings.error + '</div>');
+                    },
+                    complete: function() {
+                        submitBtn.prop('disabled', false).html(originalText);
+                    }
+                });
+            });
+           
+            // Reply form submission
+            $('#support-ticket-reply-form').on('submit', function(e) {
+                e.preventDefault();
+               
+                var form = $(this);
+                var submitBtn = form.find('button[type="submit"]');
+                var originalText = submitBtn.html();
+                var formData = new FormData(form[0]);
+               
+                // Validate required fields
+                if (!$('#support-reply-content').val()) {
+                    $('#support-ticket-reply-message').html('<div class="support-ticket-alert support-ticket-alert-error">' + support_ticket.strings.required_field + '</div>');
+                    return;
+                }
+               
+                // Validate file uploads
+                var fileInputs = form.find('input[type="file"]');
+                var validFiles = true;
+               
+                fileInputs.each(function() {
+                    var files = this.files;
+                    for (var i = 0; i < files.length; i++) {
+                        var file = files[i];
+                       
+                        // Check file size (50MB max)
+                        if (file.size > 50 * 1024 * 1024) {
+                            validFiles = false;
+                            $('#support-ticket-reply-message').html('<div class="support-ticket-alert support-ticket-alert-error">' + support_ticket.strings.file_too_big + '</div>');
+                            return false;
+                        }
+                       
+                        // Check file type
+                        var allowedTypes = ['image/png', 'image/jpeg', 'image/jpg', 'application/pdf', 'text/plain', 'video/mp4', 'video/quicktime', 'video/x-msvideo', 'video/webm'];
+                        if (allowedTypes.indexOf(file.type) === -1) {
+                            validFiles = false;
+                            $('#support-ticket-reply-message').html('<div class="support-ticket-alert support-ticket-alert-error">' + support_ticket.strings.invalid_file_type + '</div>');
+                            return false;
+                        }
+                    }
+                });
+               
+                if (!validFiles) {
+                    return;
+                }
+               
+                formData.append('action', 'support_submit_reply');
+                formData.append('nonce', support_ticket.nonce);
+               
+                submitBtn.prop('disabled', true).html('<span class="support-ticket-loading"></span> ' + support_ticket.strings.loading);
+               
+                $.ajax({
+                    url: support_ticket.ajax_url,
+                    type: 'POST',
+                    data: formData,
+                    processData: false,
+                    contentType: false,
+                    success: function(response) {
+                        if (response.success) {
+                            $('#support-ticket-reply-message').html('<div class="support-ticket-alert support-ticket-alert-success">' + response.data.message + '</div>');
+                            form[0].reset();
+                            $('.support-ticket-file-list').empty();
+                            // Reload the page to show the new reply
+                            setTimeout(function() {
+                                window.location.reload();
+                            }, 2000);
+                        } else {
+                            $('#support-ticket-reply-message').html('<div class="support-ticket-alert support-ticket-alert-error">' + response.data.message + '</div>');
+                        }
+                    },
+                    error: function(xhr, status, error) {
+                        console.error('AJAX Error:', error);
+                        $('#support-ticket-reply-message').html('<div class="support-ticket-alert support-ticket-alert-error">' + support_ticket.strings.error + '</div>');
+                    },
+                    complete: function() {
+                        submitBtn.prop('disabled', false).html(originalText);
+                    }
+                });
+            });
+           
+            // Close ticket
+            $('.support-ticket-close-btn').on('click', function(e) {
+                e.preventDefault();
+               
+                var ticketId = $(this).data('ticket-id');
+                var button = $(this);
+                var originalText = button.html();
+               
+                if (!confirm('Are you sure you want to close this ticket?')) {
+                    return;
+                }
+               
+                button.prop('disabled', true).html('<span class="support-ticket-loading"></span> Closing...');
+               
+                $.ajax({
+                    url: support_ticket.ajax_url,
+                    type: 'POST',
+                    data: {
+                        action: 'support_close_ticket',
+                        ticket_id: ticketId,
+                        nonce: support_ticket.nonce
+                    },
+                    success: function(response) {
+                        if (response.success) {
+                            $('#support-ticket-close-message').html('<div class="support-ticket-alert support-ticket-alert-success">' + response.data.message + '</div>');
+                            setTimeout(function() {
+                                window.location.reload();
+                            }, 2000);
+                        } else {
+                            $('#support-ticket-close-message').html('<div class="support-ticket-alert support-ticket-alert-error">' + response.data.message + '</div>');
+                        }
+                    },
+                    error: function(xhr, status, error) {
+                        console.error('AJAX Error:', error);
+                        $('#support-ticket-close-message').html('<div class="support-ticket-alert support-ticket-alert-error">' + support_ticket.strings.error + '</div>');
+                    },
+                    complete: function() {
+                        button.prop('disabled', false).html(originalText);
+                    }
+                });
+            });
+           
+            // File upload handling
+            $('.support-ticket-file-input').on('change', function() {
+                var input = $(this);
+                var fileList = input.closest('.support-ticket-form-group').find('.support-ticket-file-list');
+                var maxFiles = 5;
+                var currentFiles = fileList.find('.support-ticket-file-item').length;
+                var newFiles = this.files.length;
+               
+                if (currentFiles + newFiles > maxFiles) {
+                    alert('You can only upload a maximum of ' + maxFiles + ' files.');
+                    input.val('');
+                    return;
+                }
+               
+                for (var i = 0; i < this.files.length; i++) {
+                    var file = this.files[i];
+                    var fileItem = $('<div class="support-ticket-file-item"><span class="support-ticket-file-name">' + file.name + ' (' + (file.size / (1024 * 1024)).toFixed(2) + ' MB)</span><span class="support-ticket-file-remove">&times;</span></div>');
+                    fileList.append(fileItem);
+                }
+               
+                // Clear the input to allow selecting the same file again if needed
+                input.val('');
+            });
+           
+            // File removal
+            $(document).on('click', '.support-ticket-file-remove', function() {
+                $(this).closest('.support-ticket-file-item').remove();
+            });
+           
+            // Auto-fill order ID from URL
+            var urlParams = new URLSearchParams(window.location.search);
+            var orderId = urlParams.get('order_id');
+            var productName = urlParams.get('product');
+           
+            if (orderId) {
+                $('#support-order-id').val(orderId).trigger('change');
+               
+                // Auto-select product if provided in URL
+                if (productName) {
+                    setTimeout(function() {
+                        $('#support-product-name option').each(function() {
+                            if ($(this).text() === decodeURIComponent(productName)) {
+                                $(this).prop('selected', true);
+                                return false;
+                            }
+                        });
+                    }, 500);
+                }
+            }
+           
+            // Update product dropdown when order changes
+            $('#support-order-id').on('change', function() {
+                var orderId = $(this).val();
+                var productSelect = $('#support-product-name');
+               
+                if (!orderId) {
+                    productSelect.html('<option value="">Select a product</option>');
+                    return;
+                }
+               
+                // In a real implementation, you'd make an AJAX call to get order products
+                // For now, we'll just enable the field
+                productSelect.prop('disabled', false);
+            });
+
+            // Show license key status based on issue category
+            $('#support-issue-category').on('change', function() {
+                var category = $(this).val();
+                var licenseSection = $('.support-ticket-license-status-section');
+               
+                if (category === 'license_issue') {
+                    licenseSection.show();
+                    $('#support-license-status').prop('required', true);
+                } else {
+                    licenseSection.hide();
+                    $('#support-license-status').prop('required', false);
+                }
+            });
+        });
+        </script>
+        <?php
+        return ob_get_clean();
+    }
+
+   // Add report button to order details and order complete page
+public function add_report_problem_button($order) {
+    if (!$order) {
+        return;
+    }
+
+    // On the thankyou hook WooCommerce sometimes passes an order ID instead of an order object
+    if (is_numeric($order)) {
+        $order = wc_get_order(intval($order));
+        if (!$order) {
+            return;
+        }
+    }
+
+    // Only show to the order owner or admins/support agents when appropriate
+    $current_user_id = get_current_user_id();
+    if ($order->get_user_id() && $order->get_user_id() !== $current_user_id && !current_user_can('manage_options')) {
+        return;
+    }
+
+    $order_id = $order->get_id();
+    $report_url = esc_url(home_url('/submit-ticket/?order_id=' . $order_id));
+
+    echo '<div class="support-ticket-help-section-email">';
+    echo '<h3>' . __('Need Help?', 'support-ticket-system') . '</h3>';
+    echo '<p>' . __('If you have any issues with your purchase, click the button below to report a problem:', 'support-ticket-system') . '</p>';
+    echo '<a href="' . $report_url . '" class="support-ticket-btn-report-email">';
+    echo '<span class="support-ticket-btn-icon">🔧</span> ';
+    echo esc_html(__('Report a Problem', 'support-ticket-system'));
+    echo '</a>';
+    echo '</div>';
+}
+
+    // Add report button to email - IDENTICAL TO DASHBOARD
+    public function add_report_button_to_email($order, $sent_to_admin, $plain_text, $email) {
+        // Only add to customer emails, not admin emails
+        if ($sent_to_admin) {
+            return;
+        }
+
+        $order_id = $order->get_id();
+        $report_url = home_url('/submit-ticket/?order_id=' . $order_id);
+       
+        echo '<div style="background: linear-gradient(135deg, #fffaf0 0%, #feebc8 100%); border: 2px solid #fbd38d; border-radius: 12px; padding: 30px; margin: 30px 0; text-align: center; box-shadow: 0 4px 15px rgba(0,0,0,0.1); font-family: Arial, sans-serif;">';
+        echo '<h3 style="color: #744210; margin-bottom: 15px; font-size: 24px; font-weight: 700; margin-top: 0;">' . __('Need Help?', 'support-ticket-system') . '</h3>';
+        echo '<p style="color: #744210; margin-bottom: 20px; font-size: 16px; line-height: 1.6;">' . __('If you have any issues with your purchase, click the button below to report a problem:', 'support-ticket-system') . '</p>';
+        echo '<a href="' . esc_url($report_url) . '" style="background: linear-gradient(135deg, #ed8936 0%, #dd6b20 100%); color: white !important; padding: 12px 24px; border: none; border-radius: 10px; font-weight: 700; font-size: 14px; text-decoration: none; display: inline-flex; align-items: center; gap: 10px; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); box-shadow: 0 4px 15px rgba(237, 137, 54, 0.4); text-transform: uppercase; letter-spacing: 0.5px; position: relative; overflow: hidden;">';
+        echo '<span style="font-size: 18px; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.2));">🔧</span>';
+        echo __('Report a Problem', 'support-ticket-system');
+        echo '</a>';
+        echo '</div>';
+    }
+
+    // AJAX handler for closing tickets
+    public function ajax_close_ticket() {
+        check_ajax_referer('support_ticket_nonce', 'nonce');
+       
+        if (!is_user_logged_in()) {
+            wp_send_json_error(array('message' => __('You must be logged in to close a ticket.', 'support-ticket-system')));
+        }
+       
+        $ticket_id = intval($_POST['ticket_id']);
+        $ticket = get_post($ticket_id);
+       
+        if (!$ticket || $ticket->post_type !== 'support_ticket') {
+            wp_send_json_error(array('message' => __('Invalid ticket.', 'support-ticket-system')));
+        }
+       
+        // Check if user can close this ticket
+        $can_close = false;
+        if (current_user_can('administrator') || current_user_can('support_agent') || $ticket->post_author == get_current_user_id()) {
+            $can_close = true;
+        }
+       
+        if (!$can_close) {
+            wp_send_json_error(array('message' => __('You do not have permission to close this ticket.', 'support-ticket-system')));
+        }
+       
+        // Update ticket status
+        update_post_meta($ticket_id, 'status', 'closed');
+        update_post_meta($ticket_id, 'last_update', current_time('mysql'));
+        wp_set_object_terms($ticket_id, 'closed', 'ticket_status');
+       
+        // Send email notification
+        $this->send_ticket_closed_emails($ticket_id);
+       
+        wp_send_json_success(array(
+            'message' => __('Ticket has been closed successfully.', 'support-ticket-system'),
+        ));
+    }
+
+    // AJAX handler for assigning agents
+    public function ajax_assign_agent() {
+        check_ajax_referer('support_ticket_nonce', 'nonce');
+       
+        if (!current_user_can('administrator') && !current_user_can('support_agent')) {
+            wp_send_json_error(array('message' => __('You do not have permission to assign agents.', 'support-ticket-system')));
+        }
+       
+        $ticket_id = intval($_POST['ticket_id']);
+        $agent_id = intval($_POST['agent_id']);
+       
+        update_post_meta($ticket_id, 'assigned_agent', $agent_id);
+        update_post_meta($ticket_id, 'last_update', current_time('mysql'));
+       
+        wp_send_json_success(array(
+            'message' => __('Agent assigned successfully.', 'support-ticket-system'),
+        ));
+    }
+
+    // Send ticket closed emails
+    private function send_ticket_closed_emails($ticket_id) {
+        $ticket = get_post($ticket_id);
+        $ticket_number = get_post_meta($ticket_id, 'ticket_id', true);
+        $ticket_author = get_userdata($ticket->post_author);
+        $assigned_agent_id = get_post_meta($ticket_id, 'assigned_agent', true);
+       
+        $site_name = get_bloginfo('name');
+        $site_url = home_url();
+        $ticket_url = $this->get_ticket_view_url($ticket_number);
+       
+        // Email to customer
+        $customer_subject = sprintf(__('Support Ticket #%s Closed', 'support-ticket-system'), $ticket_number);
+        $customer_message = $this->get_ticket_closed_email_template($ticket_number, true, $ticket_url, $site_name, $site_url);
+        $headers = array('Content-Type: text/html; charset=UTF-8');
+       
+        wp_mail($ticket_author->user_email, $customer_subject, $customer_message, $headers);
+       
+        // Email to assigned agent if exists
+        if ($assigned_agent_id) {
+            $agent = get_userdata($assigned_agent_id);
+            if ($agent) {
+                $agent_subject = sprintf(__('Ticket #%s Closed', 'support-ticket-system'), $ticket_number);
+                $agent_message = $this->get_ticket_closed_email_template($ticket_number, false, $ticket_url, $site_name, $site_url);
+                wp_mail($agent->user_email, $agent_subject, $agent_message, $headers);
+            }
+        }
+       
+        // Email to admin
+        $admin_email = get_option('admin_email');
+        wp_mail($admin_email, $customer_subject, $customer_message, $headers);
+    }
+
+    private function get_ticket_closed_email_template($ticket_number, $is_customer, $ticket_url, $site_name, $site_url) {
+        if ($is_customer) {
+            $title = sprintf(__('Your Support Ticket #%s Has Been Closed', 'support-ticket-system'), $ticket_number);
+            $intro = __('Your support ticket has been closed. If you need further assistance, please feel free to open a new ticket.', 'support-ticket-system');
+        } else {
+            $title = sprintf(__('Support Ticket #%s Closed', 'support-ticket-system'), $ticket_number);
+            $intro = __('A support ticket has been closed.', 'support-ticket-system');
+        }
+       
+        ob_start();
+        ?>
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <title><?php echo esc_html($title); ?></title>
+        </head>
+        <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+            <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+                <h1 style="color: #38a169; margin: 0 0 10px 0;"><?php echo esc_html($title); ?></h1>
+                <p style="margin: 0;"><?php echo esc_html($intro); ?></p>
+            </div>
+           
+            <div style="background: #fff; padding: 20px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #e5e7eb;">
+                <h2 style="color: #2d3748; margin-top: 0;"><?php _e('Ticket Information', 'support-ticket-system'); ?></h2>
+                <p><strong><?php _e('Ticket ID:', 'support-ticket-system'); ?></strong> #<?php echo esc_html($ticket_number); ?></p>
+                <p><strong><?php _e('Status:', 'support-ticket-system'); ?></strong> <span style="color: #38a169; font-weight: bold;"><?php _e('Closed', 'support-ticket-system'); ?></span></p>
+            </div>
+           
+            <div style="text-align: center; margin-bottom: 20px;">
+                <a href="<?php echo esc_url($ticket_url); ?>" style="background: linear-gradient(135deg, #38a169 0%, #2f855a 100%); color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; display: inline-block; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;"><?php _e('View Ticket', 'support-ticket-system'); ?></a>
+            </div>
+           
+            <div style="border-top: 1px solid #e5e7eb; padding-top: 20px; text-align: center; color: #6b7280; font-size: 14px;">
+                <p><?php printf(__('© %s %s. All rights reserved.', 'support-ticket-system'), date('Y'), esc_html($site_name)); ?></p>
+                <p><?php printf(__('This email was sent from %s', 'support-ticket-system'), '<a href="' . esc_url($site_url) . '">' . esc_html($site_url) . '</a>'); ?></p>
+            </div>
+        </body>
+        </html>
+        <?php
+        return ob_get_clean();
+    }
+   
+    // Shortcode implementations
+    public function support_form_shortcode($atts = array()) {
+        if (!is_user_logged_in()) {
+            return $this->login_required_message();
+        }
+       
+        // Check if WooCommerce is active
+        if (!class_exists('WooCommerce')) {
+            return '<div class="support-ticket-container"><div class="support-ticket-card"><div class="support-ticket-alert support-ticket-alert-error">' . __('WooCommerce is required for this feature.', 'support-ticket-system') . '</div></div></div>';
+        }
+       
+        $current_user = wp_get_current_user();
+        $orders = $this->get_user_orders();
+       
+        // Get order_id from URL if present
+        $order_id = isset($_GET['order_id']) ? intval($_GET['order_id']) : 0;
+        $product_name = isset($_GET['product']) ? sanitize_text_field($_GET['product']) : '';
+       
+        ob_start();
+        ?>
+        <div class="support-ticket-system-wrapper">
+            <div class="support-ticket-container">
+                <div class="support-ticket-card">
+                    <div class="support-ticket-submit-title">
+                        <h1><?php _e('Create a Ticket', 'support-ticket-system'); ?></h1>
+                    </div>
+                   
+                    <div id="support-ticket-form-message"></div>
+                   
+                    <?php if (empty($orders)): ?>
+                        <div class="support-ticket-alert support-ticket-alert-info">
+                            <?php _e('You need to have at least one completed order to submit a support ticket.', 'support-ticket-system'); ?>
+                        </div>
+                    <?php else: ?>
+                        <form id="support-ticket-form" enctype="multipart/form-data">
+                            <?php if ($order_id): ?>
+                                <div class="support-ticket-order-info">
+                                    <h3><?php _e('Order Information', 'support-ticket-system'); ?></h3>
+                                    <?php
+                                    $order = wc_get_order($order_id);
+                                    if ($order && $order->get_user_id() === $current_user->ID) {
+                                        echo '<p><strong>' . __('Order ID:', 'support-ticket-system') . '</strong> #' . $order_id . '</p>';
+                                        echo '<p><strong>' . __('Order Date:', 'support-ticket-system') . '</strong> ' . $order->get_date_created()->format('F j, Y') . '</p>';
+                                        echo '<p><strong>' . __('Total:', 'support-ticket-system') . '</strong> ' . $order->get_formatted_order_total() . '</p>';
+                                    }
+                                    ?>
+                                </div>
+                                <input type="hidden" name="order_id" value="<?php echo $order_id; ?>">
+                            <?php else: ?>
+                                <div class="support-ticket-form-group">
+                                    <label for="support-order-id"><?php _e('Order ID', 'support-ticket-system'); ?> *</label>
+                                    <select id="support-order-id" name="order_id" class="support-ticket-form-control required" required>
+                                        <option value=""><?php _e('Select your order', 'support-ticket-system'); ?></option>
+                                        <?php foreach ($orders as $order): ?>
+                                            <option value="<?php echo $order->get_id(); ?>" <?php selected($order_id, $order->get_id()); ?>>
+                                                <?php printf(__('Order #%s - %s - %s', 'support-ticket-system'), $order->get_id(), $order->get_date_created()->format('M j, Y'), wc_price($order->get_total())); ?>
+                                            </option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                </div>
+                            <?php endif; ?>
+                           
+                            <div class="support-ticket-form-group">
+                                <label for="support-product-name"><?php _e('Product', 'support-ticket-system'); ?> *</label>
+                                <select id="support-product-name" name="product_name" class="support-ticket-form-control required" required>
+                                    <option value=""><?php _e('Select a product', 'support-ticket-system'); ?></option>
+                                    <?php
+                                    if ($order_id) {
+                                        $selected_order = wc_get_order($order_id);
+                                        if ($selected_order && $selected_order->get_user_id() === $current_user->ID) {
+                                            foreach ($selected_order->get_items() as $item) {
+                                                $product = $item->get_product();
+                                                if ($product) {
+                                                    $selected = ($product_name && $product->get_name() === $product_name) ? 'selected' : '';
+                                                    echo '<option value="' . esc_attr($product->get_name()) . '" ' . $selected . '>' . esc_html($product->get_name()) . '</option>';
+                                                }
+                                            }
+                                        }
+                                    }
+                                    ?>
+                                </select>
+                            </div>
+                           
+                            <div class="support-ticket-form-group">
+                                <label for="support-issue-category"><?php _e('Issue Category', 'support-ticket-system'); ?> *</label>
+                                <select id="support-issue-category" name="issue_category" class="support-ticket-form-control required" required>
+                                    <option value=""><?php _e('Select a category', 'support-ticket-system'); ?></option>
+                                    <option value="license_issue"><?php _e('Issue with License Key', 'support-ticket-system'); ?></option>
+                                    <option value="technical"><?php _e('Technical Issue', 'support-ticket-system'); ?></option>
+                                    <option value="billing"><?php _e('Billing Question', 'support-ticket-system'); ?></option>
+                                    <option value="feature"><?php _e('Feature Request', 'support-ticket-system'); ?></option>
+                                    <option value="other"><?php _e('Other', 'support-ticket-system'); ?></option>
+                                </select>
+                            </div>
+
+                            <div class="support-ticket-form-group support-ticket-license-status-section" style="display: none;">
+                                <label for="support-license-status"><?php _e('License Key Status', 'support-ticket-system'); ?> *</label>
+                                <select id="support-license-status" name="license_status" class="support-ticket-form-control">
+                                    <option value=""><?php _e('Select license status', 'support-ticket-system'); ?></option>
+                                    <option value="invalid"><?php _e('Invalid License', 'support-ticket-system'); ?></option>
+                                    <option value="revoked"><?php _e('License Revoked', 'support-ticket-system'); ?></option>
+                                    <option value="duplicate"><?php _e('Duplicate License', 'support-ticket-system'); ?></option>
+                                    <option value="expired"><?php _e('License Expired', 'support-ticket-system'); ?></option>
+                                    <option value="activation_limit"><?php _e('Activation Limit Reached', 'support-ticket-system'); ?></option>
+                                </select>
+                            </div>
+                           
+                            <div class="support-ticket-form-group">
+                                <label for="support-priority"><?php _e('Priority', 'support-ticket-system'); ?></label>
+                                <select id="support-priority" name="priority" class="support-ticket-form-control">
+                                    <option value="low"><?php _e('Low', 'support-ticket-system'); ?></option>
+                                    <option value="medium" selected><?php _e('Medium', 'support-ticket-system'); ?></option>
+                                    <option value="high"><?php _e('High', 'support-ticket-system'); ?></option>
+                                    <option value="urgent"><?php _e('Urgent', 'support-ticket-system'); ?></option>
+                                </select>
+                            </div>
+                           
+                            <div class="support-ticket-form-group">
+                                <label for="support-description"><?php _e('Description', 'support-ticket-system'); ?> *</label>
+                                <textarea id="support-description" name="description" class="support-ticket-form-control required" rows="8" required placeholder="<?php _e('Please describe your issue in detail. Include any error messages, steps to reproduce, and what you were trying to accomplish.', 'support-ticket-system'); ?>"></textarea>
+                            </div>
+                           
+                            <div class="support-ticket-form-group">
+                                <label for="support-attachments"><?php _e('Attachments (Screenshots/Videos)', 'support-ticket-system'); ?></label>
+                                <div class="support-ticket-alert support-ticket-alert-info">
+                                    <strong><?php _e('Optional:', 'support-ticket-system'); ?></strong> <?php _e('You can upload screenshots or screen recordings to help us understand your issue better.', 'support-ticket-system'); ?>
+                                </div>
+                                <div class="support-ticket-file-upload">
+                                    <input type="file" id="support-attachments" name="attachments[]" class="support-ticket-file-input" multiple accept=".png,.jpg,.jpeg,.pdf,.txt,.mp4,.mov,.avi,.webm">
+                                    <small><?php _e('You can upload up to 5 files. Maximum file size: 50MB. Allowed types: PNG, JPG, JPEG, PDF, TXT, MP4, MOV, AVI, WEBM', 'support-ticket-system'); ?></small>
+                                    <div class="support-ticket-file-list"></div>
+                                </div>
+                            </div>
+                           
+                            <div class="support-ticket-form-group">
+                                <label for="support-name"><?php _e('Your Name', 'support-ticket-system'); ?> *</label>
+                                <input type="text" id="support-name" name="customer_name" class="support-ticket-form-control required" required value="<?php echo esc_attr($current_user->display_name); ?>">
+                            </div>
+                           
+                            <div class="support-ticket-form-group">
+                                <label for="support-email"><?php _e('Your Email', 'support-ticket-system'); ?> *</label>
+                                <input type="email" id="support-email" name="customer_email" class="support-ticket-form-control required" required value="<?php echo esc_attr($current_user->user_email); ?>">
+                            </div>
+                           
+                            <button type="submit" class="support-ticket-btn support-ticket-btn-primary support-ticket-btn-block">
+                                <?php _e('Create a ticket', 'support-ticket-system'); ?>
+                            </button>
+                        </form>
+                    <?php endif; ?>
+                </div>
+            </div>
+        </div>
+        <?php
+        return ob_get_clean();
+    }
+   
+    public function support_dashboard_shortcode($atts = array()) {
+        if (!is_user_logged_in()) {
+            return $this->login_required_message();
+        }
+       
+        $current_user = wp_get_current_user();
+        $tickets = $this->get_user_tickets($current_user->ID);
+       
+        ob_start();
+        ?>
+        <div class="support-ticket-system-wrapper">
+            <div class="support-ticket-container">
+                <div class="support-ticket-card">
+                    <div class="support-ticket-header">
+                        <h1 class="support-ticket-title"><?php _e('My Support Tickets', 'support-ticket-system'); ?></h1>
+                        <a href="<?php echo esc_url(home_url('/submit-ticket/')); ?>" class="support-ticket-btn support-ticket-btn-primary">
+                            <?php _e('Create New Ticket', 'support-ticket-system'); ?>
+                        </a>
+                    </div>
+
+                    <!-- Need Help Section - IDENTICAL TO EMAIL VERSION -->
+                    <div class="support-ticket-help-section-email">
+                        <h3><?php _e('Need Help?', 'support-ticket-system'); ?></h3>
+                        <p><?php _e('If you have any issues with your purchase, click the button below to report a problem:', 'support-ticket-system'); ?></p>
+                        <a href="<?php echo esc_url(home_url('/submit-ticket/')); ?>" class="support-ticket-btn-report-email">
+                            <span class="support-ticket-btn-icon">🔧</span>
+                            <?php _e('Report a Problem', 'support-ticket-system'); ?>
+                        </a>
+                    </div>
+                   
+                    <?php if (empty($tickets)): ?>
+                        <div class="support-ticket-no-tickets">
+                            <p><?php _e('You haven\'t submitted any support tickets yet.', 'support-ticket-system'); ?></p>
+                            <a href="<?php echo esc_url(home_url('/submit-ticket/')); ?>" class="support-ticket-btn support-ticket-btn-primary">
+                                <?php _e('Create Your First Ticket', 'support-ticket-system'); ?>
+                            </a>
+                        </div>
+                    <?php else: ?>
+                        <div class="support-ticket-list">
+                            <?php foreach ($tickets as $ticket):
+                                $ticket_id = get_post_meta($ticket->ID, 'ticket_id', true);
+                                $status = get_post_meta($ticket->ID, 'status', true);
+                                $priority = get_post_meta($ticket->ID, 'priority', true);
+                                $last_update = get_post_meta($ticket->ID, 'last_update', true);
+                                $product_name = get_post_meta($ticket->ID, 'product_name', true);
+                                $assigned_agent_id = get_post_meta($ticket->ID, 'assigned_agent', true);
+                                $assigned_agent = $assigned_agent_id ? get_userdata($assigned_agent_id) : null;
+                            ?>
+                                <div class="support-ticket-item">
+                                    <div class="support-ticket-id">#<?php echo esc_html($ticket_id ?: $ticket->ID); ?></div>
+                                    <div class="support-ticket-product"><?php echo esc_html($product_name ?: __('No product', 'support-ticket-system')); ?></div>
+                                    <?php if ($assigned_agent): ?>
+                                        <div class="support-ticket-agent">
+                                            <strong><?php _e('Agent:', 'support-ticket-system'); ?></strong> <?php echo esc_html($assigned_agent->display_name); ?>
+                                        </div>
+                                    <?php endif; ?>
+                                    <div class="support-ticket-status support-status-<?php echo esc_attr($status ?: 'open'); ?>">
+                                        <?php echo esc_html(ucfirst($status ?: 'open')); ?>
+                                    </div>
+                                    <div class="support-ticket-priority support-priority-<?php echo esc_attr($priority ?: 'medium'); ?>">
+                                        <?php echo esc_html(ucfirst($priority ?: 'medium')); ?></div>
+                                    <div class="support-ticket-date"><?php echo esc_html(date('M j, Y', strtotime($last_update ?: $ticket->post_date))); ?></div>
+                                    <a href="<?php echo esc_url($this->get_ticket_view_url($ticket_id ?: $ticket->ID)); ?>" class="support-ticket-btn support-ticket-btn-secondary">
+                                        <?php _e('View', 'support-ticket-system'); ?>
+                                    </a>
+                                </div>
+                            <?php endforeach; ?>
+                        </div>
+                    <?php endif; ?>
+                </div>
+            </div>
+        </div>
+        <?php
+        return ob_get_clean();
+    }
+   
+    public function ticket_view_shortcode($atts = array()) {
+        if (!is_user_logged_in()) {
+            return $this->login_required_message();
+        }
+       
+        $ticket_id = isset($_GET['id']) ? sanitize_text_field($_GET['id']) : (isset($atts['id']) ? sanitize_text_field($atts['id']) : 0);
+        if (!$ticket_id) {
+            return '<div class="support-ticket-container"><div class="support-ticket-card"><div class="support-ticket-alert support-ticket-alert-error">' . __('Invalid ticket ID.', 'support-ticket-system') . '</div></div></div>';
+        }
+       
+        // Find the ticket by ticket_id or post ID
+        $tickets = get_posts(array(
+            'post_type' => 'support_ticket',
+            'meta_query' => array(
+                'relation' => 'OR',
+                array(
+                    'key' => 'ticket_id',
+                    'value' => $ticket_id,
+                    'compare' => '=',
+                )
+            ),
+            'posts_per_page' => 1,
+        ));
+       
+        // If not found by meta, try by post ID
+        if (empty($tickets) && is_numeric($ticket_id)) {
+            $ticket = get_post($ticket_id);
+            if ($ticket && $ticket->post_type === 'support_ticket') {
+                $tickets = array($ticket);
+            }
+        }
+       
+        if (empty($tickets)) {
+            return '<div class="support-ticket-container"><div class="support-ticket-card"><div class="support-ticket-alert support-ticket-alert-error">' . __('Ticket not found.', 'support-ticket-system') . '</div></div></div>';
+        }
+       
+        $ticket = $tickets[0];
+        $current_user = wp_get_current_user();
+       
+        // Check if user can view this ticket
+        $can_view = false;
+        if (current_user_can('administrator') || current_user_can('support_agent')) {
+            $can_view = true;
+        } elseif ($ticket->post_author == $current_user->ID) {
+            $can_view = true;
+        }
+       
+        if (!$can_view) {
+            return '<div class="support-ticket-container"><div class="support-ticket-card"><div class="support-ticket-alert support-ticket-alert-error">' . __('You do not have permission to view this ticket.', 'support-ticket-system') . '</div></div></div>';
+        }
+       
+        // Get ticket metadata
+        $ticket_meta = array(
+            'ticket_id' => get_post_meta($ticket->ID, 'ticket_id', true) ?: $ticket->ID,
+            'order_id' => get_post_meta($ticket->ID, 'order_id', true),
+            'order_date' => get_post_meta($ticket->ID, 'order_date', true),
+            'product_name' => get_post_meta($ticket->ID, 'product_name', true),
+            'license_key' => get_post_meta($ticket->ID, 'license_key', true),
+            'customer_name' => get_post_meta($ticket->ID, 'customer_name', true),
+            'customer_email' => get_post_meta($ticket->ID, 'customer_email', true),
+            'status' => get_post_meta($ticket->ID, 'status', true) ?: 'open',
+            'priority' => get_post_meta($ticket->ID, 'priority', true) ?: 'medium',
+            'last_update' => get_post_meta($ticket->ID, 'last_update', true),
+            'attachments' => get_post_meta($ticket->ID, 'attachments', true) ?: array(),
+            'assigned_agent' => get_post_meta($ticket->ID, 'assigned_agent', true),
+            'issue_category' => get_post_meta($ticket->ID, 'issue_category', true),
+            'license_status' => get_post_meta($ticket->ID, 'license_status', true),
+        );
+       
+        $assigned_agent = $ticket_meta['assigned_agent'] ? get_userdata($ticket_meta['assigned_agent']) : null;
+       
+        // Get replies
+        $replies = get_posts(array(
+            'post_type' => 'support_ticket_reply',
+            'meta_query' => array(
+                array(
+                    'key' => 'ticket_id',
+                    'value' => $ticket->ID,
+                    'compare' => '=',
+                ),
+            ),
+            'orderby' => 'date',
+            'order' => 'ASC',
+            'posts_per_page' => -1,
+        ));
+       
+        ob_start();
+        ?>
+        <div class="support-ticket-system-wrapper">
+            <div class="support-ticket-container">
+                <div class="support-ticket-card">
+                    <div class="support-ticket-header">
+                        <h1 class="support-ticket-title"><?php printf(__('Ticket #%s', 'support-ticket-system'), esc_html($ticket_meta['ticket_id'])); ?></h1>
+                        <div class="support-ticket-status support-status-<?php echo esc_attr($ticket_meta['status']); ?>">
+                            <?php echo esc_html(ucfirst($ticket_meta['status'])); ?>
+                        </div>
+                    </div>
+                   
+                    <?php if ($assigned_agent): ?>
+                        <div class="support-ticket-assigned-agent">
+                            <strong><?php _e('Assigned Support Agent:', 'support-ticket-system'); ?></strong> <?php echo esc_html($assigned_agent->display_name); ?>
+                            <?php if (current_user_can('administrator') || current_user_can('support_agent')): ?>
+                                <br><small><?php _e('Email:', 'support-ticket-system'); ?> <?php echo esc_html($assigned_agent->user_email); ?></small>
+                            <?php endif; ?>
+                        </div>
+                    <?php endif; ?>
+                   
+                    <div class="support-ticket-message">
+                        <div class="support-ticket-message-header">
+                            <div class="support-ticket-message-author">
+                                <?php echo esc_html($ticket_meta['customer_name'] ?: $current_user->display_name); ?>
+                                <?php if ($assigned_agent && $ticket->post_author != $assigned_agent->ID): ?>
+                                    <span class="support-ticket-message-agent">(<?php _e('Customer', 'support-ticket-system'); ?>)</span>
+                                <?php endif; ?>
+                            </div>
+                            <div class="support-ticket-message-date"><?php echo esc_html(date('M j, Y H:i', strtotime($ticket->post_date))); ?></div>
+                        </div>
+                        <div class="support-ticket-message-content">
+                            <p><strong><?php _e('Product:', 'support-ticket-system'); ?></strong> <?php echo esc_html($ticket_meta['product_name'] ?: __('Not specified', 'support-ticket-system')); ?></p>
+                            <?php if ($ticket_meta['order_id']): ?>
+                                <p><strong><?php _e('Order ID:', 'support-ticket-system'); ?></strong> <?php echo esc_html($ticket_meta['order_id']); ?></p>
+                            <?php endif; ?>
+                            <?php if ($ticket_meta['license_key']): ?>
+                                <p><strong><?php _e('License Key:', 'support-ticket-system'); ?></strong> <?php echo esc_html($ticket_meta['license_key']); ?></p>
+                            <?php endif; ?>
+                            <?php if ($ticket_meta['issue_category'] === 'license_issue' && $ticket_meta['license_status']): ?>
+                                <p><strong><?php _e('License Status:', 'support-ticket-system'); ?></strong>
+                                    <span class="support-ticket-license-status license-status-<?php echo esc_attr($ticket_meta['license_status']); ?>">
+                                        <?php echo esc_html(ucfirst(str_replace('_', ' ', $ticket_meta['license_status']))); ?>
+                                    </span>
+                                </p>
+                            <?php endif; ?>
+                            <p><strong><?php _e('Priority:', 'support-ticket-system'); ?></strong> <span class="support-ticket-priority support-priority-<?php echo esc_attr($ticket_meta['priority']); ?>"><?php echo esc_html(ucfirst($ticket_meta['priority'])); ?></span></p>
+                            <p><strong><?php _e('Category:', 'support-ticket-system'); ?></strong> <?php echo esc_html(ucfirst(str_replace('_', ' ', $ticket_meta['issue_category']))); ?></p>
+                            <div class="support-ticket-message-content-text">
+                                <?php echo wpautop(wp_kses_post($ticket->post_content)); ?>
+                            </div>
+                        </div>
+                        <?php if (!empty($ticket_meta['attachments'])): ?>
+                            <div class="support-ticket-attachments">
+                                <h4><?php _e('Attachments:', 'support-ticket-system'); ?></h4>
+                                <?php foreach ((array)$ticket_meta['attachments'] as $attachment):
+                                    $is_video = in_array(pathinfo($attachment['name'], PATHINFO_EXTENSION), ['mp4', 'mov', 'avi', 'webm']);
+                                ?>
+                                    <?php if ($is_video): ?>
+                                        <a href="<?php echo esc_url($attachment['url']); ?>" class="support-ticket-attachment" target="_blank">
+                                            <?php echo esc_html($attachment['name']); ?>
+                                        </a>
+                                    <?php else: ?>
+                                        <a href="<?php echo esc_url($attachment['url']); ?>" class="support-ticket-attachment" target="_blank">
+                                            <?php echo esc_html($attachment['name']); ?>
+                                        </a>
+                                    <?php endif; ?>
+                                <?php endforeach; ?>
+                            </div>
+                        <?php endif; ?>
+                    </div>
+                   
+                    <?php if (!empty($replies)): ?>
+                        <h3><?php _e('Conversation', 'support-ticket-system'); ?></h3>
+                        <?php foreach ($replies as $reply): ?>
+                            <?php
+                            $reply_author = get_userdata($reply->post_author);
+                            $reply_attachments = get_post_meta($reply->ID, 'attachments', true) ?: array();
+                            $is_agent = $reply_author && ($reply_author->has_cap('administrator') || $reply_author->has_cap('support_agent'));
+                            ?>
+                            <div class="support-ticket-message">
+                                <div class="support-ticket-message-header">
+                                    <div class="support-ticket-message-author">
+                                        <?php echo esc_html($reply_author ? $reply_author->display_name : __('Unknown', 'support-ticket-system')); ?>
+                                        <?php if ($is_agent): ?>
+                                            <span class="support-ticket-message-agent">(<?php _e('Support Agent', 'support-ticket-system'); ?>)</span>
+                                        <?php endif; ?>
+                                    </div>
+                                    <div class="support-ticket-message-date"><?php echo esc_html(date('M j, Y H:i', strtotime($reply->post_date))); ?></div>
+                                </div>
+                                <div class="support-ticket-message-content">
+                                    <?php echo wpautop(wp_kses_post($reply->post_content)); ?>
+                                </div>
+                                <?php if (!empty($reply_attachments)): ?>
+                                    <div class="support-ticket-attachments">
+                                        <h4><?php _e('Attachments:', 'support-ticket-system'); ?></h4>
+                                        <?php foreach ((array)$reply_attachments as $attachment):
+                                            $is_video = in_array(pathinfo($attachment['name'], PATHINFO_EXTENSION), ['mp4', 'mov', 'avi', 'webm']);
+                                        ?>
+                                            <?php if ($is_video): ?>
+                                                <a href="<?php echo esc_url($attachment['url']); ?>" class="support-ticket-attachment" target="_blank">
+                                                    <?php echo esc_html($attachment['name']); ?>
+                                                </a>
+                                            <?php else: ?>
+                                                <a href="<?php echo esc_url($attachment['url']); ?>" class="support-ticket-attachment" target="_blank">
+                                                    <?php echo esc_html($attachment['name']); ?>
+                                                </a>
+                                            <?php endif; ?>
+                                        <?php endforeach; ?>
+                                    </div>
+                                <?php endif; ?>
+                            </div>
+                        <?php endforeach; ?>
+                    <?php endif; ?>
+                   
+                    <?php if ($ticket_meta['status'] !== 'closed'): ?>
+                        <div class="support-ticket-reply-form">
+                            <h3><?php _e('Add Reply', 'support-ticket-system'); ?></h3>
+                            <div id="support-ticket-reply-message"></div>
+                            <form id="support-ticket-reply-form" enctype="multipart/form-data">
+                                <input type="hidden" name="ticket_id" value="<?php echo esc_attr($ticket->ID); ?>">
+                               
+                                <div class="support-ticket-form-group">
+                                    <label for="support-reply-content"><?php _e('Your Reply', 'support-ticket-system'); ?> *</label>
+                                    <textarea id="support-reply-content" name="content" class="support-ticket-form-control required" rows="6" required placeholder="<?php _e('Type your reply here', 'support-ticket-system'); ?>"></textarea>
+                                </div>
+                               
+                                <div class="support-ticket-form-group">
+                                    <label for="support-reply-attachments"><?php _e('Attachments (Screenshots/Videos)', 'support-ticket-system'); ?></label>
+                                    <div class="support-ticket-file-upload">
+                                        <input type="file" id="support-reply-attachments" name="attachments[]" class="support-ticket-file-input" multiple accept=".png,.jpg,.jpeg,.pdf,.txt,.mp4,.mov,.avi,.webm">
+                                        <small><?php _e('You can upload up to 5 files. Maximum file size: 50MB. Allowed types: PNG, JPG, JPEG, PDF, TXT, MP4, MOV, AVI, WEBM', 'support-ticket-system'); ?></small>
+                                        <div class="support-ticket-file-list"></div>
+                                    </div>
+                                </div>
+                               
+                                <button type="submit" class="support-ticket-btn support-ticket-btn-primary">
+                                    <?php _e('Submit Reply', 'support-ticket-system'); ?>
+                                </button>
+                            </form>
+                        </div>
+                       
+                        <div class="support-ticket-close-section">
+                            <div id="support-ticket-close-message"></div>
+                            <button class="support-ticket-btn support-ticket-btn-danger support-ticket-close-btn" data-ticket-id="<?php echo esc_attr($ticket->ID); ?>">
+                                <?php _e('Close Ticket', 'support-ticket-system'); ?>
+                            </button>
+                        </div>
+                    <?php else: ?>
+                        <div class="support-ticket-alert support-ticket-alert-info">
+                            <?php _e('This ticket is closed. You cannot add new replies.', 'support-ticket-system'); ?>
+                        </div>
+                    <?php endif; ?>
+                </div>
+            </div>
+        </div>
+        <?php
+        return ob_get_clean();
+    }
+   
+    // AJAX handlers
+    public function ajax_submit_ticket() {
+        check_ajax_referer('support_ticket_nonce', 'nonce');
+       
+        if (!is_user_logged_in()) {
+            wp_send_json_error(array('message' => __('You must be logged in to submit a ticket.', 'support-ticket-system')));
+        }
+       
+        $current_user = wp_get_current_user();
+       
+        // Validate required fields
+        $required_fields = array('order_id', 'product_name', 'issue_category', 'description', 'customer_name', 'customer_email');
+        foreach ($required_fields as $field) {
+            if (empty($_POST[$field])) {
+                wp_send_json_error(array('message' => sprintf(__('Please fill in all required fields. Missing: %s', 'support-ticket-system'), $field)));
+            }
+        }
+
+        // Validate license status if it's a license issue
+        if ($_POST['issue_category'] === 'license_issue' && empty($_POST['license_status'])) {
+            wp_send_json_error(array('message' => __('Please select a license key status for license issues.', 'support-ticket-system')));
+        }
+       
+        // Validate order ownership
+        $order_id = intval($_POST['order_id']);
+        $order = wc_get_order($order_id);
+       
+        if (!$order || $order->get_user_id() !== $current_user->ID) {
+            wp_send_json_error(array('message' => __('Invalid order.', 'support-ticket-system')));
+        }
+       
+        // Generate unique ticket ID
+        $ticket_id = $this->generate_unique_ticket_id();
+       
+        // Create ticket post
+        $ticket_data = array(
+            'post_title' => sprintf(__('Ticket #%s - %s', 'support-ticket-system'), $ticket_id, sanitize_text_field($_POST['product_name'])),
+            'post_content' => wp_kses_post($_POST['description']),
+            'post_status' => 'publish',
+            'post_author' => $current_user->ID,
+            'post_type' => 'support_ticket',
+        );
+       
+        $ticket_post_id = wp_insert_post($ticket_data);
+       
+        if (is_wp_error($ticket_post_id)) {
+            wp_send_json_error(array('message' => __('Failed to create ticket. Please try again.', 'support-ticket-system')));
+        }
+       
+        // Save ticket metadata
+        update_post_meta($ticket_post_id, 'ticket_id', $ticket_id);
+        update_post_meta($ticket_post_id, 'order_id', $order_id);
+        update_post_meta($ticket_post_id, 'order_date', $order->get_date_created()->format('Y-m-d H:i:s'));
+        update_post_meta($ticket_post_id, 'product_name', sanitize_text_field($_POST['product_name']));
+        update_post_meta($ticket_post_id, 'issue_category', sanitize_text_field($_POST['issue_category']));
+        update_post_meta($ticket_post_id, 'customer_name', sanitize_text_field($_POST['customer_name']));
+        update_post_meta($ticket_post_id, 'customer_email', sanitize_email($_POST['customer_email']));
+        update_post_meta($ticket_post_id, 'status', 'open');
+        update_post_meta($ticket_post_id, 'priority', sanitize_text_field($_POST['priority']));
+        update_post_meta($ticket_post_id, 'last_update', current_time('mysql'));
+       
+        // Save license status if it's a license issue
+        if ($_POST['issue_category'] === 'license_issue' && !empty($_POST['license_status'])) {
+            update_post_meta($ticket_post_id, 'license_status', sanitize_text_field($_POST['license_status']));
+        }
+       
+        // Get license key if available
+        $license_key = '';
+        foreach ($order->get_items() as $item) {
+            $product = $item->get_product();
+            if ($product && $product->get_name() === $_POST['product_name']) {
+                $license_key = $item->get_meta('_license_key');
+                if (!$license_key) {
+                    $license_key = $item->get_meta('license_key');
+                }
+                break;
+            }
+        }
+       
+        if ($license_key) {
+            update_post_meta($ticket_post_id, 'license_key', $license_key);
+        }
+       
+        // Handle file uploads
+        $attachments = array();
+        if (!empty($_FILES['attachments'])) {
+            $attachments = $this->handle_file_uploads($_FILES['attachments'], $ticket_id);
+            update_post_meta($ticket_post_id, 'attachments', $attachments);
+        }
+       
+        // Set taxonomies
+        wp_set_object_terms($ticket_post_id, 'open', 'ticket_status');
+        wp_set_object_terms($ticket_post_id, sanitize_text_field($_POST['priority']), 'ticket_priority');
+       
+        // Send emails to both buyer and seller
+        $this->send_ticket_creation_emails($ticket_post_id, $ticket_id, $current_user, $order);
+       
+        wp_send_json_success(array(
+            'message' => sprintf(__('Your ticket #%s has been created successfully. You will receive a confirmation email shortly.', 'support-ticket-system'), $ticket_id),
+            'redirect_url' => $this->get_ticket_view_url($ticket_id),
+        ));
+    }
+   
+    public function ajax_submit_reply() {
+        check_ajax_referer('support_ticket_nonce', 'nonce');
+       
+        if (!is_user_logged_in()) {
+            wp_send_json_error(array('message' => __('You must be logged in to submit a reply.', 'support-ticket-system')));
+        }
+       
+        $current_user = wp_get_current_user();
+       
+        // Validate required fields
+        if (empty($_POST['ticket_id']) || empty($_POST['content'])) {
+            wp_send_json_error(array('message' => __('Please fill in all required fields.', 'support-ticket-system')));
+        }
+       
+        $ticket_id = intval($_POST['ticket_id']);
+        $ticket = get_post($ticket_id);
+       
+        if (!$ticket || $ticket->post_type !== 'support_ticket') {
+            wp_send_json_error(array('message' => __('Invalid ticket.', 'support-ticket-system')));
+        }
+       
+        // Check if user can reply to this ticket
+        $can_reply = false;
+        if (current_user_can('administrator') || current_user_can('support_agent')) {
+            $can_reply = true;
+        } elseif ($ticket->post_author == $current_user->ID) {
+            $can_reply = true;
+        }
+       
+        if (!$can_reply) {
+            wp_send_json_error(array('message' => __('You do not have permission to reply to this ticket.', 'support-ticket-system')));
+        }
+       
+        // Check if ticket is closed
+        $status = get_post_meta($ticket_id, 'status', true);
+        if ($status === 'closed') {
+            wp_send_json_error(array('message' => __('This ticket is closed. You cannot add new replies.', 'support-ticket-system')));
+        }
+       
+        // Create reply post
+        $reply_data = array(
+            'post_title' => sprintf(__('Reply to Ticket #%s', 'support-ticket-system'), get_post_meta($ticket_id, 'ticket_id', true)),
+            'post_content' => wp_kses_post($_POST['content']),
+            'post_status' => 'publish',
+            'post_author' => $current_user->ID,
+            'post_type' => 'support_ticket_reply',
+        );
+       
+        $reply_id = wp_insert_post($reply_data);
+       
+        if (is_wp_error($reply_id)) {
+            wp_send_json_error(array('message' => __('Failed to submit reply. Please try again.', 'support-ticket-system')));
+        }
+       
+        // Save reply metadata
+        update_post_meta($reply_id, 'ticket_id', $ticket_id);
+       
+        // Handle file uploads
+        $attachments = array();
+        if (!empty($_FILES['attachments'])) {
+            $attachments = $this->handle_file_uploads($_FILES['attachments'], get_post_meta($ticket_id, 'ticket_id', true) . '_reply_' . $reply_id);
+            update_post_meta($reply_id, 'attachments', $attachments);
+        }
+       
+        // Update ticket last update
+        update_post_meta($ticket_id, 'last_update', current_time('mysql'));
+       
+        // Send email notification to both parties
+        $this->send_reply_notification_emails($ticket_id, $reply_id, $current_user);
+       
+        wp_send_json_success(array(
+            'message' => __('Your reply has been submitted successfully.', 'support-ticket-system'),
+        ));
+    }
+   
+    // Helper methods
+    private function generate_unique_ticket_id() {
+        do {
+            $ticket_id = 'TS' . str_pad(mt_rand(1, 99999), 5, '0', STR_PAD_LEFT);
+            $existing = get_posts(array(
+                'post_type' => 'support_ticket',
+                'meta_query' => array(
+                    array(
+                        'key' => 'ticket_id',
+                        'value' => $ticket_id,
+                        'compare' => '=',
+                    ),
+                ),
+                'posts_per_page' => 1,
+            ));
+        } while (!empty($existing));
+       
+        return $ticket_id;
+    }
+   
+    private function handle_file_uploads($files, $prefix) {
+        $attachments = array();
+        $upload_dir = wp_upload_dir();
+        $support_ticket_dir = $upload_dir['basedir'] . '/support-tickets';
+       
+        if (!file_exists($support_ticket_dir)) {
+            wp_mkdir_p($support_ticket_dir);
+        }
+       
+        foreach ($files['name'] as $key => $value) {
+            if ($files['error'][$key] === UPLOAD_ERR_OK) {
+                $file_tmp = $files['tmp_name'][$key];
+                $file_name = sanitize_file_name($files['name'][$key]);
+                $file_size = $files['size'][$key];
+               
+                // Generate unique filename
+                $file_ext = strtolower(pathinfo($file_name, PATHINFO_EXTENSION));
+                $unique_name = $prefix . '_' . $key . '_' . time() . '.' . $file_ext;
+                $file_path = $support_ticket_dir . '/' . $unique_name;
+               
+                // Move file to our directory
+                if (move_uploaded_file($file_tmp, $file_path)) {
+                    $attachments[] = array(
+                        'name' => $file_name,
+                        'path' => $file_path,
+                        'url' => $upload_dir['baseurl'] . '/support-tickets/' . $unique_name,
+                        'size' => $file_size,
+                    );
+                }
+            }
+        }
+       
+        return $attachments;
+    }
+   
+    private function send_ticket_creation_emails($ticket_post_id, $ticket_number, $user, $order) {
+        $ticket = get_post($ticket_post_id);
+        $ticket_meta = array(
+            'product_name' => get_post_meta($ticket_post_id, 'product_name', true),
+            'order_id' => get_post_meta($ticket_post_id, 'order_id', true),
+            'priority' => get_post_meta($ticket_post_id, 'priority', true),
+            'description' => $ticket->post_content,
+        );
+       
+        $site_name = get_bloginfo('name');
+        $site_url = home_url();
+        $ticket_url = $this->get_ticket_view_url($ticket_number);
+       
+        // Email to customer
+        $customer_subject = sprintf(__('Support Ticket #%s Created', 'support-ticket-system'), $ticket_number);
+        $customer_message = $this->get_ticket_creation_email_template($ticket_number, $ticket_meta, true, $ticket_url, $site_name, $site_url);
+        $headers = array('Content-Type: text/html; charset=UTF-8');
+       
+        wp_mail($user->user_email, $customer_subject, $customer_message, $headers);
+       
+        // Email to admin/support agents
+        $admin_subject = sprintf(__('New Support Ticket #%s', 'support-ticket-system'), $ticket_number);
+        $admin_message = $this->get_ticket_creation_email_template($ticket_number, $ticket_meta, false, $ticket_url, $site_name, $site_url);
+       
+        $admin_email = get_option('admin_email');
+        wp_mail($admin_email, $admin_subject, $admin_message, $headers);
+       
+        // Also send to support agents if they exist
+        $support_agents = get_users(array('role' => 'support_agent'));
+        foreach ($support_agents as $agent) {
+            wp_mail($agent->user_email, $admin_subject, $admin_message, $headers);
+        }
+       
+        // Send to shop manager/seller
+        $shop_manager = get_user_by('email', get_option('woocommerce_email_from_address'));
+        if ($shop_manager && $shop_manager->user_email !== $admin_email) {
+            wp_mail($shop_manager->user_email, $admin_subject, $admin_message, $headers);
+        }
+    }
+   
+    private function send_reply_notification_emails($ticket_id, $reply_id, $reply_author) {
+        $ticket = get_post($ticket_id);
+        $reply = get_post($reply_id);
+        $ticket_number = get_post_meta($ticket_id, 'ticket_id', true);
+        $ticket_author = get_userdata($ticket->post_author);
+        $assigned_agent_id = get_post_meta($ticket_id, 'assigned_agent', true);
+       
+        $site_name = get_bloginfo('name');
+        $site_url = home_url();
+        $ticket_url = $this->get_ticket_view_url($ticket_number);
+       
+        // Email to ticket author if reply is from admin/agent
+        if (current_user_can('administrator') || current_user_can('support_agent')) {
+            $customer_subject = sprintf(__('New Reply to Your Support Ticket #%s', 'support-ticket-system'), $ticket_number);
+            $customer_message = $this->get_reply_notification_email_template($ticket_number, $reply, true, $ticket_url, $site_name, $site_url);
+            $headers = array('Content-Type: text/html; charset=UTF-8');
+           
+            wp_mail($ticket_author->user_email, $customer_subject, $customer_message, $headers);
+        }
+        // Email to admin/agents if reply is from customer
+        else {
+            $admin_subject = sprintf(__('New Reply to Support Ticket #%s', 'support-ticket-system'), $ticket_number);
+            $admin_message = $this->get_reply_notification_email_template($ticket_number, $reply, false, $ticket_url, $site_name, $site_url);
+            $headers = array('Content-Type: text/html; charset=UTF-8');
+           
+            $admin_email = get_option('admin_email');
+            wp_mail($admin_email, $admin_subject, $admin_message, $headers);
+           
+            // Also send to support agents if they exist
+            $support_agents = get_users(array('role' => 'support_agent'));
+            foreach ($support_agents as $agent) {
+                wp_mail($agent->user_email, $admin_subject, $admin_message, $headers);
+            }
+           
+            // Send to assigned agent if different
+            if ($assigned_agent_id && $assigned_agent_id != get_current_user_id()) {
+                $assigned_agent = get_userdata($assigned_agent_id);
+                if ($assigned_agent) {
+                    wp_mail($assigned_agent->user_email, $admin_subject, $admin_message, $headers);
+                }
+            }
+           
+            // Send to shop manager/seller
+            $shop_manager = get_user_by('email', get_option('woocommerce_email_from_address'));
+            if ($shop_manager && $shop_manager->user_email !== $admin_email) {
+                wp_mail($shop_manager->user_email, $admin_subject, $admin_message, $headers);
+            }
+        }
+    }
+   
+    private function get_ticket_creation_email_template($ticket_number, $ticket_meta, $is_customer, $ticket_url, $site_name, $site_url) {
+        if ($is_customer) {
+            $title = sprintf(__('Your Support Ticket #%s Has Been Created', 'support-ticket-system'), $ticket_number);
+            $intro = __('Thank you for contacting our support team. Your ticket has been created and we will get back to you as soon as possible.', 'support-ticket-system');
+        } else {
+            $title = sprintf(__('New Support Ticket #%s', 'support-ticket-system'), $ticket_number);
+            $intro = __('A new support ticket has been submitted. Please review and respond as needed.', 'support-ticket-system');
+        }
+       
+        ob_start();
+        ?>
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <title><?php echo esc_html($title); ?></title>
+        </head>
+        <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+            <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+                <h1 style="color: #3b82f6; margin: 0 0 10px 0;"><?php echo esc_html($title); ?></h1>
+                <p style="margin: 0;"><?php echo esc_html($intro); ?></p>
+            </div>
+           
+            <div style="background: #fff; padding: 20px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #e5e7eb;">
+                <h2 style="color: #2d3748; margin-top: 0;"><?php _e('Ticket Details', 'support-ticket-system'); ?></h2>
+                <p><strong><?php _e('Ticket ID:', 'support-ticket-system'); ?></strong> #<?php echo esc_html($ticket_number); ?></p>
+                <p><strong><?php _e('Product:', 'support-ticket-system'); ?></strong> <?php echo esc_html($ticket_meta['product_name']); ?></p>
+                <p><strong><?php _e('Order ID:', 'support-ticket-system'); ?></strong> <?php echo esc_html($ticket_meta['order_id']); ?></p>
+                <p><strong><?php _e('Priority:', 'support-ticket-system'); ?></strong> <?php echo esc_html(ucfirst($ticket_meta['priority'])); ?></p>
+                <p><strong><?php _e('Description:', 'support-ticket-system'); ?></strong></p>
+                <div style="background: #f9fafb; padding: 15px; border-radius: 6px; margin-top: 10px;">
+                    <?php echo wpautop(wp_kses_post($ticket_meta['description'])); ?>
+                </div>
+            </div>
+           
+            <div style="text-align: center; margin-bottom: 20px;">
+                <a href="<?php echo esc_url($ticket_url); ?>" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; display: inline-block; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;"><?php _e('View Ticket', 'support-ticket-system'); ?></a>
+            </div>
+           
+            <div style="border-top: 1px solid #e5e7eb; padding-top: 20px; text-align: center; color: #6b7280; font-size: 14px;">
+                <p><?php printf(__('© %s %s. All rights reserved.', 'support-ticket-system'), date('Y'), esc_html($site_name)); ?></p>
+                <p><?php printf(__('This email was sent from %s', 'support-ticket-system'), '<a href="' . esc_url($site_url) . '">' . esc_html($site_url) . '</a>'); ?></p>
+            </div>
+        </body>
+        </html>
+        <?php
+        return ob_get_clean();
+    }
+   
+    private function get_reply_notification_email_template($ticket_number, $reply, $is_customer, $ticket_url, $site_name, $site_url) {
+        $reply_author = get_userdata($reply->post_author);
+       
+        if ($is_customer) {
+            $title = sprintf(__('New Reply to Your Support Ticket #%s', 'support-ticket-system'), $ticket_number);
+            $intro = sprintf(__('There is a new reply to your support ticket from %s.', 'support-ticket-system'), $reply_author->display_name);
+        } else {
+            $title = sprintf(__('New Reply to Support Ticket #%s', 'support-ticket-system'), $ticket_number);
+            $intro = sprintf(__('There is a new reply to the support ticket from %s.', 'support-ticket-system'), $reply_author->display_name);
+        }
+       
+        ob_start();
+        ?>
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <title><?php echo esc_html($title); ?></title>
+        </head>
+        <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+            <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+                <h1 style="color: #3b82f6; margin: 0 0 10px 0;"><?php echo esc_html($title); ?></h1>
+                <p style="margin: 0;"><?php echo esc_html($intro); ?></p>
+            </div>
+           
+            <div style="background: #fff; padding: 20px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #e5e7eb;">
+                <h2 style="color: #2d3748; margin-top: 0;"><?php _e('Reply Details', 'support-ticket-system'); ?></h2>
+                <p><strong><?php _e('Ticket ID:', 'support-ticket-system'); ?></strong> #<?php echo esc_html($ticket_number); ?></p>
+                <p><strong><?php _e('From:', 'support-ticket-system'); ?></strong> <?php echo esc_html($reply_author->display_name); ?></p>
+                <p><strong><?php _e('Date:', 'support-ticket-system'); ?></strong> <?php echo esc_html(date('M j, Y H:i', strtotime($reply->post_date))); ?></p>
+                <p><strong><?php _e('Message:', 'support-ticket-system'); ?></strong></p>
+                <div style="background: #f9fafb; padding: 15px; border-radius: 6px; margin-top: 10px;">
+                    <?php echo wpautop(wp_kses_post($reply->post_content)); ?>
+                </div>
+            </div>
+           
+            <div style="text-align: center; margin-bottom: 20px;">
+                <a href="<?php echo esc_url($ticket_url); ?>" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; display: inline-block; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;"><?php _e('View Ticket', 'support-ticket-system'); ?></a>
+            </div>
+           
+            <div style="border-top: 1px solid #e5e7eb; padding-top: 20px; text-align: center; color: #6b7280; font-size: 14px;">
+                <p><?php printf(__('© %s %s. All rights reserved.', 'support-ticket-system'), date('Y'), esc_html($site_name)); ?></p>
+                <p><?php printf(__('This email was sent from %s', 'support-ticket-system'), '<a href="' . esc_url($site_url) . '">' . esc_html($site_url) . '</a>'); ?></p>
+            </div>
+        </body>
+        </html>
+        <?php
+        return ob_get_clean();
+    }
+   
+    private function get_user_orders() {
+        if (!is_user_logged_in() || !class_exists('WooCommerce')) {
+            return array();
+        }
+       
+        $customer_orders = wc_get_orders(array(
+            'customer_id' => get_current_user_id(),
+            'limit' => -1,
+            'orderby' => 'date',
+            'order' => 'DESC',
+            'status' => array('completed', 'processing'),
+        ));
+       
+        return $customer_orders;
+    }
+   
+    private function get_user_tickets($user_id) {
+        $args = array(
+            'post_type' => 'support_ticket',
+            'author' => $user_id,
+            'posts_per_page' => -1,
+            'orderby' => 'date',
+            'order' => 'DESC',
+        );
+       
+        return get_posts($args);
+    }
+   
+    private function get_ticket_view_url($ticket_id) {
+        return add_query_arg('id', $ticket_id, home_url('/ticket-view/'));
+    }
+   
+    private function login_required_message() {
+        return '<div class="support-ticket-container">
+            <div class="support-ticket-card">
+                <div class="support-ticket-alert support-ticket-alert-error">
+                    <p>' . __('Please log in to access the support system.', 'support-ticket-system') . '</p>
+                </div>
+                <a href="' . wp_login_url(get_permalink()) . '" class="support-ticket-btn support-ticket-btn-block">
+                    ' . __('Login to Continue', 'support-ticket-system') . '
+                </a>
+            </div>
+        </div>';
+    }
+}
+
+// Initialize the plugin
+function support_ticket_system_init() {
+    return Support_Ticket_System::get_instance();
+}
+add_action('plugins_loaded', 'support_ticket_system_init');
+
+// Helper function to get ticket view URL
+function support_get_ticket_view_url($ticket_id) {
+    $plugin = Support_Ticket_System::get_instance();
+    return $plugin->get_ticket_view_url($ticket_id);
+}
+
+// Add endpoint for My Tickets
+function support_ticket_add_endpoint() {
+    add_rewrite_endpoint('my-tickets', EP_PAGES);
+}
+add_action('init', 'support_ticket_add_endpoint');
