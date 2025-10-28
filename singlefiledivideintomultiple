@@ -4,7 +4,6 @@ support-ticket-system/
 ├── 📄 uninstall.php                    # Cleanup script (runs on plugin delete)
 │
 ├── 📁 includes/                        # All PHP logic
-│   ├── 📄 class-support-ticket-system.php       # Main system class (init, hooks, loader)
 │   ├── 📁 shortcodes/
 │   │   ├── 📄 class-ticket-form-shortcode.php
 │   │   ├── 📄 class-ticket-dashboard-shortcode.php
