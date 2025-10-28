@@ -1,4 +1,4 @@
-I have a plugin in one single file: I want that code to be divide into this structure keep in mind the single file code is working fine but I want to achieve this structure using the single file plugin here is the structure I want to achieve:
+I have a plugin in one single file: I want that code to be divide into the following structure keep in mind the single file code is working fine but I want to achieve this structure using the single file plugin. give me full function multiple files plugin write complete code for each file.here is the structure I want to achieve:
 support-ticket-system/
 ├── 📄 support-ticket-system.php        # Main plugin loader (headers, init, hooks)
 ├── 📄 uninstall.php                    # Cleanup script (runs on plugin delete)
