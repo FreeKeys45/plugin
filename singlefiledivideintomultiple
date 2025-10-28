@@ -29,9 +29,6 @@ support-ticket-system/
 │   ├── 📄 ticket-dashboard.php
 │   ├── 📄 ticket-view.php
 │   └── 📄 agent-dashboard.php
-│
-└── 📁 languages/                      # Translation files
-    └── 📄 support-ticket-system.pot
 and below is the single file plugin which is working fine 100%:
 <?php
 /**
