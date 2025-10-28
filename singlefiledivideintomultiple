@@ -20,9 +20,6 @@ support-ticket-system/
 │   ├── 📁 js/
 │   │   ├── 📄 frontend.js
 │   │   └── 📄 admin.js
-│   └── 📁 img/
-│       └── 📄 icons.png
-│
 ├── 📁 templates/                      # Override‑able frontend templates
 │   ├── 📄 ticket-form.php
 │   ├── 📄 ticket-dashboard.php
