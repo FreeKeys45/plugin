@@ -3378,1032 +3378,1406 @@ function support_ticket_add_endpoint() {
     add_rewrite_endpoint('my-tickets', EP_PAGES);
 }
 add_action('init', 'support_ticket_add_endpoint');
-File 2: Ticket Page Functionality (includes/ticket-page.php)
-  <?php
-/**
- * Support Ticket System - Ticket Page Functionality
- * Contains all ticket-related shortcodes and display functions
- */
 
+
+File 2 : Ticket Page Functionality (includes/ticket-page.php)
+  <?php
 // Prevent direct access
-if (!defined('ABSPATH')) {
-    exit;
+if (!defined('WPINC')) {
+    die;
 }
 
-class Support_Ticket_Page_Functions {
-    
-    private static $instance = null;
-    
-    public static function get_instance() {
-        if (self::$instance === null) {
-            self::$instance = new self();
-        }
-        return self::$instance;
-    }
+/**
+ * Support Ticket Page Functionality
+ */
+
+class SupportTicketPage {
     
     public function __construct() {
-        // This class is loaded by the main plugin file
+        add_shortcode('support_ticket_form', array($this, 'display_ticket_form'));
+        add_action('wp_enqueue_scripts', array($this, 'enqueue_styles'));
+        add_action('wp_ajax_submit_support_ticket', array($this, 'handle_ajax_ticket_submission'));
+        add_action('wp_ajax_nopriv_submit_support_ticket', array($this, 'handle_ajax_ticket_submission'));
     }
-
-    // Shortcode implementations with improved styling
-    public function support_form_shortcode($atts = array()) {
-        if (!is_user_logged_in()) {
-            return $this->login_required_message();
-        }
-       
-        // Check if WooCommerce is active
-        if (!class_exists('WooCommerce')) {
-            return '<div class="support-ticket-container"><div class="support-ticket-card"><div class="support-ticket-alert support-ticket-alert-error">' . __('WooCommerce is required for this feature.', 'support-ticket-system') . '</div></div></div>';
-        }
-       
-        $current_user = wp_get_current_user();
-        $orders = $this->get_user_orders();
-       
-        // Get order_id from URL if present
-        $order_id = isset($_GET['order_id']) ? intval($_GET['order_id']) : 0;
-        $product_name = isset($_GET['product']) ? sanitize_text_field($_GET['product']) : '';
-       
+    
+    public function enqueue_styles() {
+        wp_enqueue_style('support-ticket-style', plugin_dir_url(__FILE__) . '../assets/ticket-style.css', array(), '1.0.0');
+        wp_enqueue_script('support-ticket-script', plugin_dir_url(__FILE__) . '../assets/ticket-script.js', array('jquery'), '1.0.0', true);
+        
+        wp_localize_script('support-ticket-script', 'ticket_ajax', array(
+            'ajax_url' => admin_url('admin-ajax.php'),
+            'nonce' => wp_create_nonce('submit_ticket_nonce')
+        ));
+    }
+    
+    public function display_ticket_form() {
         ob_start();
         ?>
-        <div class="support-ticket-system-wrapper">
-            <div class="support-ticket-container">
-                <div class="support-ticket-card">
-                    <div class="support-ticket-submit-title">
-                        <h1><?php _e('Create a Support Ticket', 'support-ticket-system'); ?></h1>
-                        <p style="color: #718096; font-size: 16px; margin-top: 10px;"><?php _e('Fill out the form below to get help with your purchase', 'support-ticket-system'); ?></p>
-                    </div>
-                   
-                    <div id="support-ticket-form-message"></div>
-                   
-                    <?php if (empty($orders)): ?>
-                        <div class="support-ticket-alert support-ticket-alert-info">
-                            <?php _e('You need to have at least one completed order to submit a support ticket.', 'support-ticket-system'); ?>
-                        </div>
-                    <?php else: ?>
-                        <div class="support-ticket-form-container">
-                            <form id="support-ticket-form" method="post" enctype="multipart/form-data">
-                                <div class="support-ticket-form-section">
-                                    <h3><?php _e('Order Information', 'support-ticket-system'); ?></h3>
-                                    <?php if ($order_id): ?>
-                                        <div class="support-ticket-order-info">
-                                            <?php
-                                            $order = wc_get_order($order_id);
-                                            if ($order && $order->get_user_id() === $current_user->ID) {
-                                                echo '<p><strong>' . __('Order ID:', 'support-ticket-system') . '</strong> #' . $order_id . '</p>';
-                                                echo '<p><strong>' . __('Order Date:', 'support-ticket-system') . '</strong> ' . $order->get_date_created()->format('F j, Y') . '</p>';
-                                                echo '<p><strong>' . __('Total:', 'support-ticket-system') . '</strong> ' . $order->get_formatted_order_total() . '</p>';
-                                            }
-                                            ?>
-                                        </div>
-                                        <input type="hidden" name="order_id" value="<?php echo $order_id; ?>">
-                                    <?php else: ?>
-                                        <div class="support-ticket-form-group">
-                                            <label for="support-order-id"><?php _e('Order ID', 'support-ticket-system'); ?> *</label>
-                                            <select id="support-order-id" name="order_id" class="support-ticket-form-control required" required>
-                                                <option value=""><?php _e('Select your order', 'support-ticket-system'); ?></option>
-                                                <?php foreach ($orders as $order): ?>
-                                                    <option value="<?php echo $order->get_id(); ?>" <?php selected($order_id, $order->get_id()); ?>>
-                                                        <?php printf(__('Order #%s - %s - %s', 'support-ticket-system'), $order->get_id(), $order->get_date_created()->format('M j, Y'), wc_price($order->get_total())); ?>
-                                                    </option>
-                                                <?php endforeach; ?>
-                                            </select>
-                                        </div>
-                                    <?php endif; ?>
-                                   
-                                    <div class="support-ticket-form-group">
-                                        <label for="support-product-name"><?php _e('Product', 'support-ticket-system'); ?> *</label>
-                                        <select id="support-product-name" name="product_name" class="support-ticket-form-control required" required>
-                                            <option value=""><?php _e('Select a product', 'support-ticket-system'); ?></option>
-                                            <?php
-                                            if ($order_id) {
-                                                $selected_order = wc_get_order($order_id);
-                                                if ($selected_order && $selected_order->get_user_id() === $current_user->ID) {
-                                                    foreach ($selected_order->get_items() as $item) {
-                                                        $product = $item->get_product();
-                                                        if ($product) {
-                                                            $selected = ($product_name && $product->get_name() === $product_name) ? 'selected' : '';
-                                                            echo '<option value="' . esc_attr($product->get_name()) . '" ' . $selected . '>' . esc_html($product->get_name()) . '</option>';
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                            ?>
-                                        </select>
-                                    </div>
-                                </div>
-
-                                <div class="support-ticket-form-section">
-                                    <h3><?php _e('Issue Details', 'support-ticket-system'); ?></h3>
-                                   
-                                    <div class="support-ticket-form-group">
-                                        <label for="support-issue-category"><?php _e('Issue Category', 'support-ticket-system'); ?> *</label>
-                                        <select id="support-issue-category" name="issue_category" class="support-ticket-form-control required" required>
-                                            <option value=""><?php _e('Select a category', 'support-ticket-system'); ?></option>
-                                            <option value="license_issue"><?php _e('Issue with License Key', 'support-ticket-system'); ?></option>
-                                            <option value="technical"><?php _e('Technical Issue', 'support-ticket-system'); ?></option>
-                                            <option value="billing"><?php _e('Billing Question', 'support-ticket-system'); ?></option>
-                                            <option value="feature"><?php _e('Feature Request', 'support-ticket-system'); ?></option>
-                                            <option value="other"><?php _e('Other', 'support-ticket-system'); ?></option>
-                                        </select>
-                                    </div>
-
-                                    <div class="support-ticket-form-group support-ticket-license-section" style="display: none;">
-                                        <div class="support-license-key-group">
-                                            <label><?php _e('License Keys', 'support-ticket-system'); ?></label>
-                                            <p class="support-license-key-description"><?php _e('Enter your license keys manually. Click the + button to add multiple keys.', 'support-ticket-system'); ?></p>
-                                           
-                                            <div class="support-license-keys-container">
-                                                <div class="support-license-key-row">
-                                                    <div class="support-license-key-input">
-                                                        <input type="text" name="license_keys[]" class="support-ticket-form-control" placeholder="<?php _e('Enter license key manually', 'support-ticket-system'); ?>">
-                                                    </div>
-                                                    <button type="button" class="support-license-key-add">+ <?php _e('Add Key', 'support-ticket-system'); ?></button>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    <div class="support-ticket-form-group support-ticket-license-status-section" style="display: none;">
-                                        <label for="support-license-status"><?php _e('License Key Status', 'support-ticket-system'); ?> *</label>
-                                        <select id="support-license-status" name="license_status" class="support-ticket-form-control">
-                                            <option value=""><?php _e('Select license status', 'support-ticket-system'); ?></option>
-                                            <option value="invalid"><?php _e('Invalid License', 'support-ticket-system'); ?></option>
-                                            <option value="revoked"><?php _e('License Revoked', 'support-ticket-system'); ?></option>
-                                            <option value="duplicate"><?php _e('Duplicate License', 'support-ticket-system'); ?></option>
-                                            <option value="expired"><?php _e('License Expired', 'support-ticket-system'); ?></option>
-                                            <option value="activation_limit"><?php _e('Activation Limit Reached', 'support-ticket-system'); ?></option>
-                                        </select>
-                                    </div>
-                                   
-                                    <div class="support-ticket-form-group">
-                                        <label for="support-priority"><?php _e('Priority', 'support-ticket-system'); ?></label>
-                                        <select id="support-priority" name="priority" class="support-ticket-form-control">
-                                            <option value="low"><?php _e('Low', 'support-ticket-system'); ?></option>
-                                            <option value="medium" selected><?php _e('Medium', 'support-ticket-system'); ?></option>
-                                            <option value="high"><?php _e('High', 'support-ticket-system'); ?></option>
-                                            <option value="urgent"><?php _e('Urgent', 'support-ticket-system'); ?></option>
-                                        </select>
-                                    </div>
-                                   
-                                    <div class="support-ticket-form-group">
-                                        <label for="support-description"><?php _e('Description', 'support-ticket-system'); ?> *</label>
-                                        <textarea id="support-description" name="description" class="support-ticket-form-control required" rows="8" required placeholder="<?php _e('Please describe your issue in detail. Include any error messages, steps to reproduce, and what you were trying to accomplish.', 'support-ticket-system'); ?>"></textarea>
-                                    </div>
-                                </div>
-
-                                <div class="support-ticket-form-section">
-                                    <h3><?php _e('Attachments', 'support-ticket-system'); ?></h3>
-                                    <div class="support-ticket-form-note">
-                                        <strong><?php _e('Optional:', 'support-ticket-system'); ?></strong> <?php _e('You can upload screenshots or screen recordings to help us understand your issue better.', 'support-ticket-system'); ?>
-                                    </div>
-                                   
-                                    <div class="support-ticket-form-group">
-                                        <div class="support-ticket-file-upload">
-                                            <input type="file" id="support-attachments" name="attachments[]" class="support-ticket-file-input" multiple accept=".png,.jpg,.jpeg,.pdf,.txt,.mp4,.mov,.avi,.webm">
-                                            <small><?php _e('You can upload up to 5 files. Maximum file size: 50MB. Allowed types: PNG, JPG, JPEG, PDF, TXT, MP4, MOV, AVI, WEBM', 'support-ticket-system'); ?></small>
-                                            <div class="support-ticket-file-list"></div>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <div class="support-ticket-form-section">
-                                    <h3><?php _e('Contact Information', 'support-ticket-system'); ?></h3>
-                                   
-                                    <div class="support-ticket-form-group">
-                                        <label for="support-name"><?php _e('Your Name', 'support-ticket-system'); ?> *</label>
-                                        <input type="text" id="support-name" name="customer_name" class="support-ticket-form-control required" required value="<?php echo esc_attr($current_user->display_name); ?>">
-                                    </div>
-                                   
-                                    <div class="support-ticket-form-group">
-                                        <label for="support-email"><?php _e('Your Email', 'support-ticket-system'); ?> *</label>
-                                        <input type="email" id="support-email" name="customer_email" class="support-ticket-form-control required" required value="<?php echo esc_attr($current_user->user_email); ?>">
-                                    </div>
-                                </div>
-                               
-                                <button type="submit" class="support-ticket-btn support-ticket-btn-primary support-ticket-btn-block" style="padding: 15px; font-size: 16px;">
-                                    <?php _e('Create Support Ticket', 'support-ticket-system'); ?>
-                                </button>
-                            </form>
-                        </div>
-                    <?php endif; ?>
+        <div class="sts-ticket-page">
+            <div class="sts-container">
+                <div class="sts-header">
+                    <h1><i class="fas fa-life-ring"></i> Create Support Ticket</h1>
+                    <p>Fill out the form below to get help with your product</p>
                 </div>
-            </div>
-        </div>
-        <?php
-        return ob_get_clean();
-    }
-   
-    public function support_dashboard_shortcode($atts = array()) {
-        if (!is_user_logged_in()) {
-            return $this->login_required_message();
-        }
-       
-        $current_user = wp_get_current_user();
-        $tickets = $this->get_user_tickets($current_user->ID);
-        $metrics = $this->get_ticket_metrics($current_user->ID);
-       
-        ob_start();
-        ?>
-        <div class="support-ticket-system-wrapper">
-            <div class="support-ticket-container">
-                <div class="support-ticket-card">
-                    <div class="support-ticket-header">
-                        <h1 class="support-ticket-title"><?php _e('My Support Tickets', 'support-ticket-system'); ?></h1>
-                        <a href="<?php echo esc_url(home_url('/submit-ticket/')); ?>" class="support-ticket-btn support-ticket-btn-primary">
-                            <?php _e('Create New Ticket', 'support-ticket-system'); ?>
-                        </a>
-                    </div>
-
-                    <!-- Metrics Dashboard -->
-                    <div class="support-ticket-metrics">
-                        <div class="support-ticket-metric-card">
-                            <div class="support-ticket-metric-value"><?php echo $metrics['total']; ?></div>
-                            <div class="support-ticket-metric-label"><?php _e('Total Tickets', 'support-ticket-system'); ?></div>
+                
+                <form id="sts-ticket-form" class="sts-ticket-form" method="POST" enctype="multipart/form-data">
+                    <?php wp_nonce_field('submit_ticket_action', 'ticket_nonce'); ?>
+                    
+                    <!-- Customer Information Section -->
+                    <div class="sts-form-section">
+                        <h3><i class="fas fa-user"></i> Your Information</h3>
+                        <div class="sts-form-row">
+                            <div class="sts-form-group">
+                                <label for="sts_customer_name">Full Name *</label>
+                                <input type="text" id="sts_customer_name" name="customer_name" required 
+                                       placeholder="Enter your full name">
+                                <span class="sts-field-error"></span>
+                            </div>
+                            
+                            <div class="sts-form-group">
+                                <label for="sts_customer_email">Email Address *</label>
+                                <input type="email" id="sts_customer_email" name="customer_email" required 
+                                       placeholder="your@email.com">
+                                <span class="sts-field-error"></span>
+                            </div>
                         </div>
-                        <div class="support-ticket-metric-card">
-                            <div class="support-ticket-metric-value"><?php echo $metrics['open']; ?></div>
-                            <div class="support-ticket-metric-label"><?php _e('Open Tickets', 'support-ticket-system'); ?></div>
-                        </div>
-                        <div class="support-ticket-metric-card">
-                            <div class="support-ticket-metric-value"><?php echo $metrics['closed']; ?></div>
-                            <div class="support-ticket-metric-label"><?php _e('Closed Tickets', 'support-ticket-system'); ?></div>
+                        
+                        <div class="sts-form-row">
+                            <div class="sts-form-group">
+                                <label for="sts_customer_phone">Phone Number</label>
+                                <input type="tel" id="sts_customer_phone" name="customer_phone" 
+                                       placeholder="+1 (555) 123-4567">
+                            </div>
+                            
+                            <div class="sts-form-group">
+                                <label for="sts_company">Company Name</label>
+                                <input type="text" id="sts_company" name="company" 
+                                       placeholder="Your company name (optional)">
+                            </div>
                         </div>
                     </div>
-
-                    <!-- Search and Filters -->
-                    <div class="support-ticket-search">
-                        <input type="text" id="support-ticket-search" placeholder="<?php _e('Search tickets...', 'support-ticket-system'); ?>">
-                    </div>
-
-                    <div class="support-ticket-filters">
-                        <select id="support-status-filter">
-                            <option value=""><?php _e('All Statuses', 'support-ticket-system'); ?></option>
-                            <option value="open"><?php _e('Open', 'support-ticket-system'); ?></option>
-                            <option value="pending"><?php _e('Pending', 'support-ticket-system'); ?></option>
-                            <option value="closed"><?php _e('Closed', 'support-ticket-system'); ?></option>
-                        </select>
-                       
-                        <select id="support-priority-filter">
-                            <option value=""><?php _e('All Priorities', 'support-ticket-system'); ?></option>
-                            <option value="urgent"><?php _e('Urgent', 'support-ticket-system'); ?></option>
-                            <option value="high"><?php _e('High', 'support-ticket-system'); ?></option>
-                            <option value="medium"><?php _e('Medium', 'support-ticket-system'); ?></option>
-                            <option value="low"><?php _e('Low', 'support-ticket-system'); ?></option>
-                        </select>
-                    </div>
-
-                    <!-- Bulk Actions -->
-                    <div class="support-ticket-bulk-actions">
-                        <select id="support-bulk-action">
-                            <option value=""><?php _e('Bulk Actions', 'support-ticket-system'); ?></option>
-                            <option value="close"><?php _e('Close Tickets', 'support-ticket-system'); ?></option>
-                        </select>
-                        <button type="button" class="support-ticket-btn" id="support-apply-bulk"><?php _e('Apply', 'support-ticket-system'); ?></button>
-                    </div>
-
-                    <!-- Need Help Section -->
-                    <div class="support-ticket-help-section-email">
-                        <h3><?php _e('Need Help?', 'support-ticket-system'); ?></h3>
-                        <p><?php _e('If you have any issues with your purchase, click the button below to report a problem:', 'support-ticket-system'); ?></p>
-                        <a href="<?php echo esc_url(home_url('/submit-ticket/')); ?>" class="support-ticket-btn-report-email">
-                            <span class="support-ticket-btn-icon">🔧</span>
-                            <?php _e('Report a Problem', 'support-ticket-system'); ?>
-                        </a>
-                    </div>
-                   
-                    <?php if (empty($tickets)): ?>
-                        <div class="support-ticket-no-tickets">
-                            <p><?php _e('You haven\'t submitted any support tickets yet.', 'support-ticket-system'); ?></p>
-                            <a href="<?php echo esc_url(home_url('/submit-ticket/')); ?>" class="support-ticket-btn support-ticket-btn-primary">
-                                <?php _e('Create Your First Ticket', 'support-ticket-system'); ?>
-                            </a>
+                    
+                    <!-- Product Information Section -->
+                    <div class="sts-form-section">
+                        <h3><i class="fas fa-cube"></i> Product Information</h3>
+                        <div class="sts-form-row">
+                            <div class="sts-form-group">
+                                <label for="sts_product_category">Product Category *</label>
+                                <select id="sts_product_category" name="product_category" required>
+                                    <option value="">Select Category</option>
+                                    <option value="premium-plugin">Premium Plugin</option>
+                                    <option value="basic-plugin">Basic Plugin</option>
+                                    <option value="premium-theme">Premium Theme</option>
+                                    <option value="basic-theme">Basic Theme</option>
+                                    <option value="addon">Add-on/Extension</option>
+                                    <option value="bundle">Product Bundle</option>
+                                    <option value="other">Other</option>
+                                </select>
+                                <span class="sts-field-error"></span>
+                            </div>
+                            
+                            <div class="sts-form-group">
+                                <label for="sts_product_name">Product Name *</label>
+                                <select id="sts_product_name" name="product_name" required>
+                                    <option value="">Select Product</option>
+                                    <optgroup label="Premium Plugins">
+                                        <option value="ultimate-seo-pro">Ultimate SEO Pro</option>
+                                        <option value="ecommerce-master">Ecommerce Master</option>
+                                        <option value="security-shield-pro">Security Shield Pro</option>
+                                        <option value="speed-optimizer">Speed Optimizer Pro</option>
+                                    </optgroup>
+                                    <optgroup label="Basic Plugins">
+                                        <option value="seo-basic">SEO Basic</option>
+                                        <option value="contact-form-basic">Contact Form Basic</option>
+                                        <option value="gallery-basic">Gallery Basic</option>
+                                    </optgroup>
+                                    <optgroup label="Themes">
+                                        <option value="business-pro-theme">Business Pro Theme</option>
+                                        <option value="portfolio-theme">Portfolio Theme</option>
+                                        <option value="woocommerce-theme">WooCommerce Theme</option>
+                                    </optgroup>
+                                </select>
+                                <span class="sts-field-error"></span>
+                            </div>
                         </div>
-                    <?php else: ?>
-                        <div class="support-ticket-list">
-                            <?php foreach ($tickets as $ticket):
-                                $ticket_id = get_post_meta($ticket->ID, 'ticket_id', true);
-                                $status = get_post_meta($ticket->ID, 'status', true);
-                                $priority = get_post_meta($ticket->ID, 'priority', true);
-                                $last_update = get_post_meta($ticket->ID, 'last_update', true);
-                                $product_name = get_post_meta($ticket->ID, 'product_name', true);
-                                $assigned_agent_id = get_post_meta($ticket->ID, 'assigned_agent', true);
-                                $assigned_agent = $assigned_agent_id ? get_userdata($assigned_agent_id) : null;
-                            ?>
-                                <div class="support-ticket-item" data-ticket="<?php echo $ticket->ID; ?>">
-                                    <input type="checkbox" class="support-ticket-checkbox" value="<?php echo $ticket->ID; ?>">
-                                    <div class="support-ticket-id">#<?php echo esc_html($ticket_id ?: $ticket->ID); ?></div>
-                                    <div class="support-ticket-product"><?php echo esc_html($product_name ?: __('No product', 'support-ticket-system')); ?></div>
-                                    <?php if ($assigned_agent): ?>
-                                        <div class="support-ticket-agent">
-                                            <strong><?php _e('Agent:', 'support-ticket-system'); ?></strong> <?php echo esc_html($assigned_agent->display_name); ?>
-                                        </div>
-                                    <?php endif; ?>
-                                    <div class="support-ticket-status support-status-<?php echo esc_attr($status ?: 'open'); ?>">
-                                        <?php echo esc_html(ucfirst($status ?: 'open')); ?>
-                                    </div>
-                                    <div class="support-ticket-priority support-priority-<?php echo esc_attr($priority ?: 'medium'); ?>">
-                                        <?php echo esc_html(ucfirst($priority ?: 'medium')); ?></div>
-                                    <div class="support-ticket-date"><?php echo esc_html(date('M j, Y', strtotime($last_update ?: $ticket->post_date))); ?></div>
-                                    <div class="support-ticket-quick-actions">
-                                        <button class="support-ticket-quick-btn" data-action="view" data-ticket="<?php echo $ticket->ID; ?>">👁️</button>
-                                        <?php if ($status !== 'closed'): ?>
-                                            <button class="support-ticket-quick-btn" data-action="close" data-ticket="<?php echo $ticket->ID; ?>">✅</button>
-                                        <?php endif; ?>
-                                    </div>
-                                    <a href="<?php echo esc_url($this->get_ticket_view_url($ticket_id ?: $ticket->ID)); ?>" class="support-ticket-btn support-ticket-btn-secondary">
-                                        <?php _e('View', 'support-ticket-system'); ?>
-                                    </a>
+                        
+                        <div class="sts-form-row">
+                            <div class="sts-form-group">
+                                <label for="sts_license_key">License Key *</label>
+                                <input type="text" id="sts_license_key" name="license_key" required 
+                                       placeholder="Enter your purchase code or license key">
+                                <small class="sts-help-text">You can find this in your purchase confirmation email</small>
+                                <span class="sts-field-error"></span>
+                            </div>
+                            
+                            <div class="sts-form-group">
+                                <label for="sts_purchase_date">Purchase Date</label>
+                                <input type="date" id="sts_purchase_date" name="purchase_date">
+                                <small class="sts-help-text">Approximate date of purchase</small>
+                            </div>
+                        </div>
+                        
+                        <div class="sts-form-group">
+                            <label for="sts_website_url">Website URL *</label>
+                            <input type="url" id="sts_website_url" name="website_url" required 
+                                   placeholder="https://yourwebsite.com">
+                            <span class="sts-field-error"></span>
+                        </div>
+                    </div>
+                    
+                    <!-- Issue Details Section -->
+                    <div class="sts-form-section">
+                        <h3><i class="fas fa-exclamation-circle"></i> Issue Details</h3>
+                        
+                        <div class="sts-form-row">
+                            <div class="sts-form-group">
+                                <label for="sts_issue_type">Issue Type *</label>
+                                <select id="sts_issue_type" name="issue_type" required>
+                                    <option value="">Select Issue Type</option>
+                                    <option value="technical">Technical Problem</option>
+                                    <option value="installation">Installation Issue</option>
+                                    <option value="configuration">Configuration Help</option>
+                                    <option value="bug">Bug Report</option>
+                                    <option value="feature">Feature Request</option>
+                                    <option value="billing">Billing Question</option>
+                                    <option value="license">License Activation</option>
+                                    <option value="other">Other</option>
+                                </select>
+                                <span class="sts-field-error"></span>
+                            </div>
+                            
+                            <div class="sts-form-group">
+                                <label for="sts_priority">Priority Level *</label>
+                                <select id="sts_priority" name="priority" required>
+                                    <option value="low">Low - General Question</option>
+                                    <option value="medium" selected>Medium - Minor Issue</option>
+                                    <option value="high">High - Feature Not Working</option>
+                                    <option value="urgent">Urgent - Site Down/Critical</option>
+                                </select>
+                                <span class="sts-field-error"></span>
+                            </div>
+                        </div>
+                        
+                        <div class="sts-form-group">
+                            <label for="sts_ticket_subject">Subject *</label>
+                            <input type="text" id="sts_ticket_subject" name="ticket_subject" required 
+                                   placeholder="Brief description of your issue">
+                            <span class="sts-field-error"></span>
+                        </div>
+                        
+                        <div class="sts-form-group">
+                            <label for="sts_ticket_description">Detailed Description *</label>
+                            <textarea id="sts_ticket_description" name="ticket_description" rows="8" required 
+                                      placeholder="Please provide detailed information about your issue. Include steps to reproduce, error messages, and what you were trying to achieve."></textarea>
+                            <div class="sts-character-count">
+                                <span id="sts_char_count">0</span> characters (minimum 50)
+                            </div>
+                            <span class="sts-field-error"></span>
+                        </div>
+                        
+                        <div class="sts-form-row">
+                            <div class="sts-form-group">
+                                <label for="sts_environment">Your Environment</label>
+                                <select id="sts_environment" name="environment">
+                                    <option value="">Select Environment</option>
+                                    <option value="local">Local Development</option>
+                                    <option value="staging">Staging Site</option>
+                                    <option value="production" selected>Production/Live Site</option>
+                                </select>
+                            </div>
+                            
+                            <div class="sts-form-group">
+                                <label for="sts_wordpress_version">WordPress Version</label>
+                                <input type="text" id="sts_wordpress_version" name="wordpress_version" 
+                                       placeholder="e.g., 6.3, 6.4" value="<?php echo get_bloginfo('version'); ?>">
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Attachments Section -->
+                    <div class="sts-form-section">
+                        <h3><i class="fas fa-paperclip"></i> Attachments</h3>
+                        <div class="sts-form-group">
+                            <label for="sts_attachments">Screenshots or Files</label>
+                            <div class="sts-file-upload">
+                                <input type="file" id="sts_attachments" name="attachments[]" multiple 
+                                       accept=".jpg,.jpeg,.png,.gif,.pdf,.doc,.docx,.txt,.log">
+                                <div class="sts-file-upload-label">
+                                    <i class="fas fa-cloud-upload-alt"></i>
+                                    <span>Click to upload files or drag and drop</span>
+                                    <small>Maximum file size: 10MB per file. Allowed: images, documents, logs</small>
                                 </div>
-                            <?php endforeach; ?>
-                        </div>
-                    <?php endif; ?>
-                </div>
-            </div>
-        </div>
-        <?php
-        return ob_get_clean();
-    }
-
-    // Agent Dashboard Shortcode with improved styling
-    public function agent_dashboard_shortcode($atts = array()) {
-        // Check if user is logged in and has agent role
-        if (!is_user_logged_in()) {
-            return $this->agent_login_form();
-        }
-       
-        $current_user = wp_get_current_user();
-        if (!in_array('support_agent', $current_user->roles) && !in_array('administrator', $current_user->roles)) {
-            return '<div class="support-ticket-container"><div class="support-ticket-card"><div class="support-ticket-alert support-ticket-alert-error">' . __('You do not have permission to access this page.', 'support-ticket-system') . '</div></div></div>';
-        }
-       
-        // Get tickets assigned to this agent or all tickets for admin
-        $tickets = $this->get_agent_tickets($current_user->ID);
-        $metrics = $this->get_agent_ticket_metrics($current_user->ID);
-       
-        ob_start();
-        ?>
-        <div class="support-ticket-system-wrapper">
-            <div class="support-ticket-container">
-                <div class="support-ticket-card">
-                    <div class="support-ticket-header">
-                        <h1 class="support-ticket-title"><?php _e('Agent Dashboard', 'support-ticket-system'); ?></h1>
-                        <div>
-                            <span class="support-ticket-welcome"><?php printf(__('Welcome, %s', 'support-ticket-system'), esc_html($current_user->display_name)); ?></span>
-                            <a href="<?php echo wp_logout_url(home_url('/agent-dashboard/')); ?>" class="support-ticket-btn support-ticket-btn-danger">
-                                <?php _e('Logout', 'support-ticket-system'); ?>
-                            </a>
+                            </div>
+                            <div id="sts-file-list" class="sts-file-list"></div>
                         </div>
                     </div>
-
-                    <!-- Metrics Dashboard -->
-                    <div class="support-ticket-metrics">
-                        <div class="support-ticket-metric-card">
-                            <div class="support-ticket-metric-value"><?php echo $metrics['total']; ?></div>
-                            <div class="support-ticket-metric-label"><?php _e('Total Tickets', 'support-ticket-system'); ?></div>
+                    
+                    <!-- Additional Information -->
+                    <div class="sts-form-section">
+                        <h3><i class="fas fa-info-circle"></i> Additional Information</h3>
+                        <div class="sts-form-group">
+                            <label for="sts_additional_notes">Additional Notes (Optional)</label>
+                            <textarea id="sts_additional_notes" name="additional_notes" rows="4" 
+                                      placeholder="Any other information that might help us resolve your issue faster..."></textarea>
                         </div>
-                        <div class="support-ticket-metric-card">
-                            <div class="support-ticket-metric-value"><?php echo $metrics['open']; ?></div>
-                            <div class="support-ticket-metric-label"><?php _e('Open Tickets', 'support-ticket-system'); ?></div>
-                        </div>
-                        <div class="support-ticket-metric-card">
-                            <div class="support-ticket-metric-value"><?php echo $metrics['closed']; ?></div>
-                            <div class="support-ticket-metric-label"><?php _e('Closed Tickets', 'support-ticket-system'); ?></div>
-                        </div>
-                        <div class="support-ticket-metric-card">
-                            <div class="support-ticket-metric-value"><?php echo $metrics['pending']; ?></div>
-                            <div class="support-ticket-metric-label"><?php _e('Pending Tickets', 'support-ticket-system'); ?></div>
-                        </div>
-                    </div>
-
-                    <!-- Search and Filters -->
-                    <div class="support-ticket-search">
-                        <input type="text" id="support-ticket-search" placeholder="<?php _e('Search tickets...', 'support-ticket-system'); ?>">
-                    </div>
-
-                    <div class="support-ticket-filters">
-                        <select id="support-status-filter">
-                            <option value=""><?php _e('All Statuses', 'support-ticket-system'); ?></option>
-                            <option value="open"><?php _e('Open', 'support-ticket-system'); ?></option>
-                            <option value="pending"><?php _e('Pending', 'support-ticket-system'); ?></option>
-                            <option value="closed"><?php _e('Closed', 'support-ticket-system'); ?></option>
-                        </select>
-                       
-                        <select id="support-priority-filter">
-                            <option value=""><?php _e('All Priorities', 'support-ticket-system'); ?></option>
-                            <option value="urgent"><?php _e('Urgent', 'support-ticket-system'); ?></option>
-                            <option value="high"><?php _e('High', 'support-ticket-system'); ?></option>
-                            <option value="medium"><?php _e('Medium', 'support-ticket-system'); ?></option>
-                            <option value="low"><?php _e('Low', 'support-ticket-system'); ?></option>
-                        </select>
-                       
-                        <?php if (in_array('administrator', $current_user->roles)): ?>
-                            <select id="support-agent-filter">
-                                <option value=""><?php _e('All Agents', 'support-ticket-system'); ?></option>
-                                <?php
-                                $agents = get_users(array('role' => 'support_agent'));
-                                foreach ($agents as $agent) {
-                                    echo '<option value="' . $agent->ID . '">' . esc_html($agent->display_name) . '</option>';
-                                }
-                                ?>
-                            </select>
-                        <?php endif; ?>
-                    </div>
-
-                    <!-- Bulk Actions -->
-                    <div class="support-ticket-bulk-actions">
-                        <select id="support-bulk-action">
-                            <option value=""><?php _e('Bulk Actions', 'support-ticket-system'); ?></option>
-                            <option value="close"><?php _e('Close Tickets', 'support-ticket-system'); ?></option>
-                            <option value="assign"><?php _e('Assign to Me', 'support-ticket-system'); ?></option>
-                        </select>
-                        <button type="button" class="support-ticket-btn" id="support-apply-bulk"><?php _e('Apply', 'support-ticket-system'); ?></button>
-                    </div>
-               
-                    <?php if (empty($tickets)): ?>
-                        <div class="support-ticket-no-tickets">
-                            <p><?php _e('No tickets found.', 'support-ticket-system'); ?></p>
-                        </div>
-                    <?php else: ?>
-                        <div class="support-ticket-list">
-                            <?php foreach ($tickets as $ticket):
-                                $ticket_id = get_post_meta($ticket->ID, 'ticket_id', true);
-                                $status = get_post_meta($ticket->ID, 'status', true);
-                                $priority = get_post_meta($ticket->ID, 'priority', true);
-                                $last_update = get_post_meta($ticket->ID, 'last_update', true);
-                                $product_name = get_post_meta($ticket->ID, 'product_name', true);
-                                $assigned_agent_id = get_post_meta($ticket->ID, 'assigned_agent', true);
-                                $assigned_agent = $assigned_agent_id ? get_userdata($assigned_agent_id) : null;
-                                $customer = get_userdata($ticket->post_author);
-                            ?>
-                                <div class="support-ticket-item" data-ticket="<?php echo $ticket->ID; ?>">
-                                    <input type="checkbox" class="support-ticket-checkbox" value="<?php echo $ticket->ID; ?>">
-                                    <div class="support-ticket-id">#<?php echo esc_html($ticket_id ?: $ticket->ID); ?></div>
-                                    <div class="support-ticket-product"><?php echo esc_html($product_name ?: __('No product', 'support-ticket-system')); ?></div>
-                                    <div class="support-ticket-customer">
-                                        <strong><?php _e('Customer:', 'support-ticket-system'); ?></strong> <?php echo esc_html($customer ? $customer->display_name : __('Unknown', 'support-ticket-system')); ?>
-                                    </div>
-                                    <?php if ($assigned_agent): ?>
-                                        <div class="support-ticket-agent">
-                                            <strong><?php _e('Agent:', 'support-ticket-system'); ?></strong> <?php echo esc_html($assigned_agent->display_name); ?>
-                                        </div>
-                                    <?php endif; ?>
-                                    <div class="support-ticket-status support-status-<?php echo esc_attr($status ?: 'open'); ?>">
-                                        <?php echo esc_html(ucfirst($status ?: 'open')); ?>
-                                    </div>
-                                    <div class="support-ticket-priority support-priority-<?php echo esc_attr($priority ?: 'medium'); ?>">
-                                        <?php echo esc_html(ucfirst($priority ?: 'medium')); ?>
-                                    </div>
-                                    <div class="support-ticket-date"><?php echo esc_html(date('M j, Y', strtotime($last_update ?: $ticket->post_date))); ?></div>
-                                    <div class="support-ticket-quick-actions">
-                                        <button class="support-ticket-quick-btn" data-action="view" data-ticket="<?php echo $ticket->ID; ?>">👁️</button>
-                                        <?php if ($status !== 'closed'): ?>
-                                            <button class="support-ticket-quick-btn" data-action="close" data-ticket="<?php echo $ticket->ID; ?>">✅</button>
-                                        <?php endif; ?>
-                                    </div>
-                                    <a href="<?php echo esc_url($this->get_ticket_view_url($ticket_id ?: $ticket->ID)); ?>" class="support-ticket-btn support-ticket-btn-secondary">
-                                        <?php _e('View', 'support-ticket-system'); ?>
-                                    </a>
-                                </div>
-                            <?php endforeach; ?>
-                        </div>
-                    <?php endif; ?>
-                </div>
-            </div>
-        </div>
-        <?php
-        return ob_get_clean();
-    }
-
-    // Agent login form with improved styling
-    private function agent_login_form() {
-        ob_start();
-        ?>
-        <div class="support-ticket-system-wrapper">
-            <div class="support-ticket-container">
-                <div class="support-ticket-card">
-                    <div class="support-ticket-submit-title">
-                        <h1><?php _e('Agent Login', 'support-ticket-system'); ?></h1>
-                        <p style="color: #718096; font-size: 16px; margin-top: 10px;"><?php _e('Access the support agent dashboard', 'support-ticket-system'); ?></p>
-                    </div>
-                   
-                    <div id="support-agent-login-message"></div>
-                   
-                    <form id="support-agent-login-form">
-                        <div class="support-ticket-form-group">
-                            <label for="agent-username"><?php _e('Username', 'support-ticket-system'); ?> *</label>
-                            <input type="text" id="agent-username" name="log" class="support-ticket-form-control required" required>
-                        </div>
-                       
-                        <div class="support-ticket-form-group">
-                            <label for="agent-password"><?php _e('Password', 'support-ticket-system'); ?> *</label>
-                            <input type="password" id="agent-password" name="pwd" class="support-ticket-form-control required" required>
-                        </div>
-                       
-                        <div class="support-ticket-form-group">
-                            <label>
-                                <input type="checkbox" name="rememberme" value="forever">
-                                <?php _e('Remember Me', 'support-ticket-system'); ?>
+                        
+                        <div class="sts-form-group sts-checkbox-group">
+                            <label class="sts-checkbox">
+                                <input type="checkbox" name="agree_terms" required>
+                                <span class="sts-checkmark"></span>
+                                I agree to the <a href="#" target="_blank">Terms of Service</a> and understand that support is provided according to my license type
                             </label>
                         </div>
-                       
-                        <button type="submit" class="support-ticket-btn support-ticket-btn-primary support-ticket-btn-block">
-                            <?php _e('Login to Dashboard', 'support-ticket-system'); ?>
-                        </button>
-                    </form>
-                   
-                    <p class="support-ticket-login-links">
-                        <a href="<?php echo wp_lostpassword_url(home_url('/agent-dashboard/')); ?>">
-                            <?php _e('Lost your password?', 'support-ticket-system'); ?>
-                        </a>
-                    </p>
-                </div>
-            </div>
-        </div>
-        <?php
-        return ob_get_clean();
-    }
-   
-    public function ticket_view_shortcode($atts = array()) {
-        if (!is_user_logged_in()) {
-            return $this->login_required_message();
-        }
-       
-        $ticket_id = isset($_GET['id']) ? sanitize_text_field($_GET['id']) : (isset($atts['id']) ? sanitize_text_field($atts['id']) : 0);
-        if (!$ticket_id) {
-            return '<div class="support-ticket-container"><div class="support-ticket-card"><div class="support-ticket-alert support-ticket-alert-error">' . __('Invalid ticket ID.', 'support-ticket-system') . '</div></div></div>';
-        }
-       
-        // Find the ticket by ticket_id or post ID
-        $tickets = get_posts(array(
-            'post_type' => 'support_ticket',
-            'meta_query' => array(
-                'relation' => 'OR',
-                array(
-                    'key' => 'ticket_id',
-                    'value' => $ticket_id,
-                    'compare' => '=',
-                )
-            ),
-            'posts_per_page' => 1,
-        ));
-       
-        // If not found by meta, try by post ID
-        if (empty($tickets) && is_numeric($ticket_id)) {
-            $ticket = get_post($ticket_id);
-            if ($ticket && $ticket->post_type === 'support_ticket') {
-                $tickets = array($ticket);
-            }
-        }
-       
-        if (empty($tickets)) {
-            return '<div class="support-ticket-container"><div class="support-ticket-card"><div class="support-ticket-alert support-ticket-alert-error">' . __('Ticket not found.', 'support-ticket-system') . '</div></div></div>';
-        }
-       
-        $ticket = $tickets[0];
-        $current_user = wp_get_current_user();
-       
-        // Check if user can view this ticket
-        $can_view = false;
-        if (current_user_can('administrator') || current_user_can('support_agent')) {
-            $can_view = true;
-        } elseif ($ticket->post_author == $current_user->ID) {
-            $can_view = true;
-        }
-       
-        if (!$can_view) {
-            return '<div class="support-ticket-container"><div class="support-ticket-card"><div class="support-ticket-alert support-ticket-alert-error">' . __('You do not have permission to view this ticket.', 'support-ticket-system') . '</div></div></div>';
-        }
-       
-        // Get ticket metadata
-        $ticket_meta = array(
-            'ticket_id' => get_post_meta($ticket->ID, 'ticket_id', true) ?: $ticket->ID,
-            'order_id' => get_post_meta($ticket->ID, 'order_id', true),
-            'order_date' => get_post_meta($ticket->ID, 'order_date', true),
-            'product_name' => get_post_meta($ticket->ID, 'product_name', true),
-            'license_keys' => get_post_meta($ticket->ID, 'license_keys', true) ?: array(),
-            'customer_name' => get_post_meta($ticket->ID, 'customer_name', true),
-            'customer_email' => get_post_meta($ticket->ID, 'customer_email', true),
-            'status' => get_post_meta($ticket->ID, 'status', true) ?: 'open',
-            'priority' => get_post_meta($ticket->ID, 'priority', true) ?: 'medium',
-            'last_update' => get_post_meta($ticket->ID, 'last_update', true),
-            'attachments' => get_post_meta($ticket->ID, 'attachments', true) ?: array(),
-            'assigned_agent' => get_post_meta($ticket->ID, 'assigned_agent', true),
-            'issue_category' => get_post_meta($ticket->ID, 'issue_category', true),
-            'license_status' => get_post_meta($ticket->ID, 'license_status', true),
-            'internal_notes' => get_post_meta($ticket->ID, 'internal_notes', true),
-        );
-       
-        $assigned_agent = $ticket_meta['assigned_agent'] ? get_userdata($ticket_meta['assigned_agent']) : null;
-       
-        // Get replies
-        $replies = get_posts(array(
-            'post_type' => 'support_ticket_reply',
-            'meta_query' => array(
-                array(
-                    'key' => 'ticket_id',
-                    'value' => $ticket->ID,
-                    'compare' => '=',
-                ),
-            ),
-            'orderby' => 'date',
-            'order' => 'ASC',
-            'posts_per_page' => -1,
-        ));
-       
-        // Get ticket timeline
-        $timeline = $this->get_ticket_timeline($ticket->ID);
-       
-        ob_start();
-        ?>
-        <div class="support-ticket-system-wrapper">
-            <div class="support-ticket-container">
-                <div class="support-ticket-card">
-                    <div class="support-ticket-header">
-                        <h1 class="support-ticket-title"><?php printf(__('Ticket #%s', 'support-ticket-system'), esc_html($ticket_meta['ticket_id'])); ?></h1>
-                        <div class="support-ticket-status support-status-<?php echo esc_attr($ticket_meta['status']); ?>">
-                            <?php echo esc_html(ucfirst($ticket_meta['status'])); ?>
+                        
+                        <div class="sts-form-group sts-checkbox-group">
+                            <label class="sts-checkbox">
+                                <input type="checkbox" name="share_data" checked>
+                                <span class="sts-checkmark"></span>
+                                I allow temporary access to my site data for troubleshooting purposes
+                            </label>
                         </div>
                     </div>
-                   
-                    <?php if ($assigned_agent): ?>
-                        <div class="support-ticket-assigned-agent">
-                            <strong><?php _e('Assigned Support Agent:', 'support-ticket-system'); ?></strong> <?php echo esc_html($assigned_agent->display_name); ?>
-                            <?php if (current_user_can('administrator') || current_user_can('support_agent')): ?>
-                                <br><small><?php _e('Email:', 'support-ticket-system'); ?> <?php echo esc_html($assigned_agent->user_email); ?></small>
-                                <br>
-                                <button class="support-remove-agent-btn" data-ticket-id="<?php echo $ticket->ID; ?>">
-                                    <?php _e('Remove Agent from Ticket', 'support-ticket-system'); ?>
-                                </button>
-                            <?php endif; ?>
-                        </div>
-                    <?php endif; ?>
-
-                    <!-- Agent Assignment (for admins/agents) -->
-                    <?php if (current_user_can('administrator') || current_user_can('support_agent')): ?>
-                        <?php $this->add_ticket_assignment_interface($ticket->ID); ?>
-                    <?php endif; ?>
-
-                    <!-- Internal Notes (for admins/agents) -->
-                    <?php if (current_user_can('administrator') || current_user_can('support_agent')): ?>
-                        <div class="support-ticket-internal-notes">
-                            <h4><?php _e('Internal Notes', 'support-ticket-system'); ?></h4>
-                            <textarea id="support-internal-notes" class="support-ticket-form-control" placeholder="<?php _e('Add internal notes here...', 'support-ticket-system'); ?>" data-ticket-id="<?php echo $ticket->ID; ?>"><?php echo esc_textarea($ticket_meta['internal_notes']); ?></textarea>
-                            <button type="button" class="support-ticket-btn" id="support-save-notes" data-ticket-id="<?php echo $ticket->ID; ?>"><?php _e('Save Notes', 'support-ticket-system'); ?></button>
-                        </div>
-                    <?php endif; ?>
-                   
-                    <div class="support-ticket-message">
-                        <div class="support-ticket-message-header">
-                            <div class="support-ticket-message-author">
-                                <?php echo esc_html($ticket_meta['customer_name'] ?: $current_user->display_name); ?>
-                                <?php if ($assigned_agent && $ticket->post_author != $assigned_agent->ID): ?>
-                                    <span class="support-ticket-message-agent">(<?php _e('Customer', 'support-ticket-system'); ?>)</span>
-                                <?php endif; ?>
-                            </div>
-                            <div class="support-ticket-message-date"><?php echo esc_html(date('M j, Y H:i', strtotime($ticket->post_date))); ?></div>
-                        </div>
-                        <div class="support-ticket-message-content">
-                            <p><strong><?php _e('Product:', 'support-ticket-system'); ?></strong> <?php echo esc_html($ticket_meta['product_name'] ?: __('Not specified', 'support-ticket-system')); ?></p>
-                            <?php if ($ticket_meta['order_id']): ?>
-                                <p><strong><?php _e('Order ID:', 'support-ticket-system'); ?></strong> <?php echo esc_html($ticket_meta['order_id']); ?></p>
-                            <?php endif; ?>
-                            <?php if (!empty($ticket_meta['license_keys'])): ?>
-                                <p><strong><?php _e('License Keys:', 'support-ticket-system'); ?></strong>
-                                    <?php
-                                    if (is_array($ticket_meta['license_keys'])) {
-                                        echo esc_html(implode(', ', $ticket_meta['license_keys']));
-                                    } else {
-                                        echo esc_html($ticket_meta['license_keys']);
-                                    }
-                                    ?>
-                                </p>
-                            <?php endif; ?>
-                            <?php if ($ticket_meta['issue_category'] === 'license_issue' && $ticket_meta['license_status']): ?>
-                                <p><strong><?php _e('License Status:', 'support-ticket-system'); ?></strong>
-                                    <span class="support-ticket-license-status license-status-<?php echo esc_attr($ticket_meta['license_status']); ?>">
-                                        <?php echo esc_html(ucfirst(str_replace('_', ' ', $ticket_meta['license_status']))); ?>
-                                    </span>
-                                </p>
-                            <?php endif; ?>
-                            <p><strong><?php _e('Priority:', 'support-ticket-system'); ?></strong> <span class="support-ticket-priority support-priority-<?php echo esc_attr($ticket_meta['priority']); ?>"><?php echo esc_html(ucfirst($ticket_meta['priority'])); ?></span></p>
-                            <p><strong><?php _e('Category:', 'support-ticket-system'); ?></strong> <?php echo esc_html(ucfirst(str_replace('_', ' ', $ticket_meta['issue_category']))); ?></p>
-                            <div class="support-ticket-message-content-text">
-                                <?php echo wpautop(wp_kses_post($ticket->post_content)); ?>
-                            </div>
-                        </div>
-                        <?php if (!empty($ticket_meta['attachments'])): ?>
-                            <div class="support-ticket-attachments">
-                                <h4><?php _e('Attachments:', 'support-ticket-system'); ?></h4>
-                                <?php foreach ((array)$ticket_meta['attachments'] as $attachment):
-                                    $is_video = in_array(pathinfo($attachment['name'], PATHINFO_EXTENSION), ['mp4', 'mov', 'avi', 'webm']);
-                                ?>
-                                    <?php if ($is_video): ?>
-                                        <a href="<?php echo esc_url($attachment['url']); ?>" class="support-ticket-attachment" target="_blank">
-                                            <?php echo esc_html($attachment['name']); ?>
-                                        </a>
-                                    <?php else: ?>
-                                        <a href="<?php echo esc_url($attachment['url']); ?>" class="support-ticket-attachment" target="_blank">
-                                            <?php echo esc_html($attachment['name']); ?>
-                                        </a>
-                                    <?php endif; ?>
-                                <?php endforeach; ?>
-                            </div>
-                        <?php endif; ?>
-                    </div>
-                   
-                    <?php if (!empty($replies)): ?>
-                        <h3><?php _e('Conversation', 'support-ticket-system'); ?></h3>
-                        <?php foreach ($replies as $reply): ?>
-                            <?php
-                            $reply_author = get_userdata($reply->post_author);
-                            $reply_attachments = get_post_meta($reply->ID, 'attachments', true) ?: array();
-                            $is_agent = $reply_author && ($reply_author->has_cap('administrator') || $reply_author->has_cap('support_agent'));
-                            ?>
-                            <div class="support-ticket-message">
-                                <div class="support-ticket-message-header">
-                                    <div class="support-ticket-message-author">
-                                        <?php echo esc_html($reply_author ? $reply_author->display_name : __('Unknown', 'support-ticket-system')); ?>
-                                        <?php if ($is_agent): ?>
-                                            <span class="support-ticket-message-agent">(<?php _e('Support Agent', 'support-ticket-system'); ?>)</span>
-                                        <?php endif; ?>
-                                    </div>
-                                    <div class="support-ticket-message-date"><?php echo esc_html(date('M j, Y H:i', strtotime($reply->post_date))); ?></div>
-                                </div>
-                                <div class="support-ticket-message-content">
-                                    <?php echo wpautop(wp_kses_post($reply->post_content)); ?>
-                                </div>
-                                <?php if (!empty($reply_attachments)): ?>
-                                    <div class="support-ticket-attachments">
-                                        <h4><?php _e('Attachments:', 'support-ticket-system'); ?></h4>
-                                        <?php foreach ((array)$reply_attachments as $attachment):
-                                            $is_video = in_array(pathinfo($attachment['name'], PATHINFO_EXTENSION), ['mp4', 'mov', 'avi', 'webm']);
-                                        ?>
-                                            <?php if ($is_video): ?>
-                                                <a href="<?php echo esc_url($attachment['url']); ?>" class="support-ticket-attachment" target="_blank">
-                                                    <?php echo esc_html($attachment['name']); ?>
-                                                </a>
-                                            <?php else: ?>
-                                                <a href="<?php echo esc_url($attachment['url']); ?>" class="support-ticket-attachment" target="_blank">
-                                                    <?php echo esc_html($attachment['name']); ?>
-                                                </a>
-                                            <?php endif; ?>
-                                        <?php endforeach; ?>
-                                    </div>
-                                <?php endif; ?>
-                            </div>
-                        <?php endforeach; ?>
-                    <?php endif; ?>
-
-                    <!-- Ticket Timeline -->
-                    <?php if (!empty($timeline)): ?>
-                        <div class="support-ticket-timeline">
-                            <h3><?php _e('Ticket History', 'support-ticket-system'); ?></h3>
-                            <?php foreach ($timeline as $event): ?>
-                                <div class="support-ticket-timeline-item">
-                                    <div class="support-ticket-timeline-date">
-                                        <?php echo esc_html(date('M j, Y H:i', strtotime($event['date']))); ?>
-                                    </div>
-                                    <div class="support-ticket-timeline-content">
-                                        <strong><?php echo esc_html($event['description']); ?></strong>
-                                        <?php if (isset($event['user'])): ?>
-                                            <br><small><?php _e('By:', 'support-ticket-system'); ?> <?php echo esc_html($event['user']->display_name); ?></small>
-                                        <?php endif; ?>
-                                    </div>
-                                </div>
-                            <?php endforeach; ?>
-                        </div>
-                    <?php endif; ?>
-                   
-                    <?php if ($ticket_meta['status'] !== 'closed'): ?>
-                        <div class="support-ticket-reply-form">
-                            <h3><?php _e('Add Reply', 'support-ticket-system'); ?></h3>
-                            <div id="support-ticket-reply-message"></div>
-                            <form id="support-ticket-reply-form" enctype="multipart/form-data">
-                                <input type="hidden" name="ticket_id" value="<?php echo esc_attr($ticket->ID); ?>">
-                               
-                                <div class="support-ticket-form-group">
-                                    <label for="support-reply-content"><?php _e('Your Reply', 'support-ticket-system'); ?> *</label>
-                                    <textarea id="support-reply-content" name="content" class="support-ticket-form-control required" rows="6" required placeholder="<?php _e('Type your reply here', 'support-ticket-system'); ?>"></textarea>
-                                </div>
-                               
-                                <div class="support-ticket-form-group">
-                                    <label for="support-reply-attachments"><?php _e('Attachments (Screenshots/Videos)', 'support-ticket-system'); ?></label>
-                                    <div class="support-ticket-file-upload">
-                                        <input type="file" id="support-reply-attachments" name="attachments[]" class="support-ticket-file-input" multiple accept=".png,.jpg,.jpeg,.pdf,.txt,.mp4,.mov,.avi,.webm">
-                                        <small><?php _e('You can upload up to 5 files. Maximum file size: 50MB. Allowed types: PNG, JPG, JPEG, PDF, TXT, MP4, MOV, AVI, WEBM', 'support-ticket-system'); ?></small>
-                                        <div class="support-ticket-file-list"></div>
-                                    </div>
-                                </div>
-                               
-                                <button type="submit" class="support-ticket-btn support-ticket-btn-primary">
-                                    <?php _e('Submit Reply', 'support-ticket-system'); ?>
-                                </button>
-                            </form>
-                        </div>
-                       
-                        <div class="support-ticket-close-section">
-                            <div id="support-ticket-close-message"></div>
-                            <button class="support-ticket-btn support-ticket-btn-danger support-ticket-close-btn" data-ticket-id="<?php echo esc_attr($ticket->ID); ?>">
-                                <?php _e('Close Ticket', 'support-ticket-system'); ?>
+                    
+                    <!-- Submit Section -->
+                    <div class="sts-form-section sts-submit-section">
+                        <div class="sts-form-actions">
+                            <button type="submit" id="sts-submit-btn" class="sts-submit-btn">
+                                <i class="fas fa-paper-plane"></i>
+                                <span class="sts-btn-text">Submit Ticket</span>
+                                <div class="sts-spinner"></div>
+                            </button>
+                            
+                            <button type="reset" class="sts-reset-btn">
+                                <i class="fas fa-redo"></i>
+                                Clear Form
                             </button>
                         </div>
-                    <?php else: ?>
-                        <div class="support-ticket-alert support-ticket-alert-info">
-                            <?php _e('This ticket is closed. You cannot add new replies.', 'support-ticket-system'); ?>
+                        
+                        <div class="sts-support-info">
+                            <h4><i class="fas fa-clock"></i> Support Hours</h4>
+                            <p>Monday - Friday: 9:00 AM - 6:00 PM (Your Timezone)<br>
+                            Average Response Time: 2-4 hours during business hours</p>
                         </div>
-                    <?php endif; ?>
+                    </div>
+                </form>
+                
+                <!-- Success Message -->
+                <div id="sts-success-message" class="sts-message sts-success-message" style="display: none;">
+                    <div class="sts-message-icon">
+                        <i class="fas fa-check-circle"></i>
+                    </div>
+                    <div class="sts-message-content">
+                        <h3>Ticket Submitted Successfully!</h3>
+                        <p>Your support ticket has been created. We've sent a confirmation to your email.</p>
+                        <div class="sts-ticket-info">
+                            <strong>Ticket ID: <span id="sts-ticket-id"></span></strong><br>
+                            <small>Please keep this ID for reference. We'll get back to you soon.</small>
+                        </div>
+                        <button id="sts-new-ticket" class="sts-new-ticket-btn">
+                            <i class="fas fa-plus"></i> Create Another Ticket
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>
         <?php
         return ob_get_clean();
     }
-
-    // Helper methods for ticket page functionality
-    private function get_user_orders() {
-        if (!is_user_logged_in() || !class_exists('WooCommerce')) {
-            return array();
+    
+    public function handle_ajax_ticket_submission() {
+        // Verify nonce
+        if (!wp_verify_nonce($_POST['nonce'], 'submit_ticket_nonce')) {
+            wp_die('Security check failed');
         }
-       
-        $customer_orders = wc_get_orders(array(
-            'customer_id' => get_current_user_id(),
-            'limit' => -1,
-            'orderby' => 'date',
-            'order' => 'DESC',
-            'status' => array('completed', 'processing'),
-        ));
-       
-        return $customer_orders;
-    }
-   
-    private function get_user_tickets($user_id, $page = 1, $per_page = 10) {
-        $args = array(
+        
+        // Validate and sanitize data
+        $ticket_data = array(
+            'customer_name' => sanitize_text_field($_POST['customer_name']),
+            'customer_email' => sanitize_email($_POST['customer_email']),
+            'customer_phone' => sanitize_text_field($_POST['customer_phone']),
+            'company' => sanitize_text_field($_POST['company']),
+            'product_category' => sanitize_text_field($_POST['product_category']),
+            'product_name' => sanitize_text_field($_POST['product_name']),
+            'license_key' => sanitize_text_field($_POST['license_key']),
+            'purchase_date' => sanitize_text_field($_POST['purchase_date']),
+            'website_url' => esc_url_raw($_POST['website_url']),
+            'issue_type' => sanitize_text_field($_POST['issue_type']),
+            'priority' => sanitize_text_field($_POST['priority']),
+            'ticket_subject' => sanitize_text_field($_POST['ticket_subject']),
+            'ticket_description' => wp_kses_post($_POST['ticket_description']),
+            'environment' => sanitize_text_field($_POST['environment']),
+            'wordpress_version' => sanitize_text_field($_POST['wordpress_version']),
+            'additional_notes' => wp_kses_post($_POST['additional_notes'])
+        );
+        
+        // Create ticket post
+        $ticket_id = wp_insert_post(array(
+            'post_title' => $ticket_data['ticket_subject'],
+            'post_content' => $ticket_data['ticket_description'],
+            'post_status' => 'publish',
             'post_type' => 'support_ticket',
-            'author' => $user_id,
-            'posts_per_page' => $per_page,
-            'paged' => $page,
-            'orderby' => 'date',
-            'order' => 'DESC',
-        );
-       
-        return get_posts($args);
-    }
-   
-    private function get_agent_tickets($agent_id) {
-        $current_user = wp_get_current_user();
-       
-        // If admin, get all tickets
-        if (in_array('administrator', $current_user->roles)) {
-            $args = array(
-                'post_type' => 'support_ticket',
-                'posts_per_page' => -1,
-                'orderby' => 'date',
-                'order' => 'DESC',
-            );
+            'meta_input' => $ticket_data
+        ));
+        
+        if ($ticket_id && !is_wp_error($ticket_id)) {
+            // Handle file uploads
+            $this->handle_file_uploads($ticket_id);
+            
+            // Send confirmation email
+            $this->send_confirmation_email($ticket_id, $ticket_data);
+            
+            wp_send_json_success(array(
+                'ticket_id' => $ticket_id,
+                'message' => 'Ticket submitted successfully!'
+            ));
         } else {
-            // If agent, get tickets assigned to them
-            $args = array(
-                'post_type' => 'support_ticket',
-                'meta_query' => array(
-                    array(
-                        'key' => 'assigned_agent',
-                        'value' => $agent_id,
-                        'compare' => '=',
-                    ),
-                ),
-                'posts_per_page' => -1,
-                'orderby' => 'date',
-                'order' => 'DESC',
-            );
+            wp_send_json_error(array(
+                'message' => 'Error submitting ticket. Please try again.'
+            ));
         }
-       
-        return get_posts($args);
     }
-
-    private function get_agent_ticket_metrics($agent_id) {
-        $tickets = $this->get_agent_tickets($agent_id);
-       
-        $metrics = array(
-            'total' => count($tickets),
-            'open' => 0,
-            'closed' => 0,
-            'pending' => 0,
-        );
-       
-        foreach ($tickets as $ticket) {
-            $status = get_post_meta($ticket->ID, 'status', true);
-            if ($status === 'open') {
-                $metrics['open']++;
-            } elseif ($status === 'closed') {
-                $metrics['closed']++;
-            } elseif ($status === 'pending') {
-                $metrics['pending']++;
+    
+    private function handle_file_uploads($ticket_id) {
+        if (!empty($_FILES['attachments'])) {
+            require_once(ABSPATH . 'wp-admin/includes/file.php');
+            require_once(ABSPATH . 'wp-admin/includes/media.php');
+            require_once(ABSPATH . 'wp-admin/includes/image.php');
+            
+            $attachments = array();
+            foreach ($_FILES['attachments']['name'] as $key => $value) {
+                if ($_FILES['attachments']['error'][$key] === 0) {
+                    $file = array(
+                        'name' => $_FILES['attachments']['name'][$key],
+                        'type' => $_FILES['attachments']['type'][$key],
+                        'tmp_name' => $_FILES['attachments']['tmp_name'][$key],
+                        'error' => $_FILES['attachments']['error'][$key],
+                        'size' => $_FILES['attachments']['size'][$key]
+                    );
+                    
+                    $upload = wp_handle_upload($file, array('test_form' => false));
+                    if (!isset($upload['error'])) {
+                        $attachments[] = $upload['url'];
+                    }
+                }
+            }
+            
+            if (!empty($attachments)) {
+                update_post_meta($ticket_id, '_ticket_attachments', $attachments);
             }
         }
-       
-        return $metrics;
     }
-   
-    private function get_ticket_view_url($ticket_id) {
-        return add_query_arg('id', $ticket_id, home_url('/ticket-view/'));
-    }
-   
-    private function login_required_message() {
-        return '<div class="support-ticket-container">
-            <div class="support-ticket-card">
-                <div class="support-ticket-alert support-ticket-alert-error">
-                    <p>' . __('Please log in to access the support system.', 'support-ticket-system') . '</p>
+    
+    private function send_confirmation_email($ticket_id, $ticket_data) {
+        $to = $ticket_data['customer_email'];
+        $subject = 'Support Ticket Created - Ticket #' . $ticket_id;
+        $headers = array('Content-Type: text/html; charset=UTF-8');
+        
+        $message = "
+        <html>
+        <head>
+            <style>
+                body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+                .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+                .header { background: #007cba; color: white; padding: 20px; text-align: center; }
+                .content { padding: 20px; background: #f9f9f9; }
+                .ticket-info { background: white; padding: 15px; border-left: 4px solid #007cba; margin: 10px 0; }
+            </style>
+        </head>
+        <body>
+            <div class='container'>
+                <div class='header'>
+                    <h1>Support Ticket Created</h1>
                 </div>
-                <a href="' . wp_login_url(get_permalink()) . '" class="support-ticket-btn support-ticket-btn-block">
-                    ' . __('Login to Continue', 'support-ticket-system') . '
-                </a>
+                <div class='content'>
+                    <p>Hello {$ticket_data['customer_name']},</p>
+                    <p>Thank you for contacting our support team. We have received your ticket and will get back to you shortly.</p>
+                    
+                    <div class='ticket-info'>
+                        <strong>Ticket ID:</strong> #{$ticket_id}<br>
+                        <strong>Subject:</strong> {$ticket_data['ticket_subject']}<br>
+                        <strong>Product:</strong> {$ticket_data['product_name']}<br>
+                        <strong>Priority:</strong> " . ucfirst($ticket_data['priority']) . "<br>
+                    </div>
+                    
+                    <p>You can view your ticket or add additional information by replying to this email.</p>
+                    <p>Best regards,<br>Support Team</p>
+                </div>
             </div>
-        </div>';
-    }
-
-    private function get_ticket_metrics($user_id = null) {
-        $user_id = $user_id ?: get_current_user_id();
-       
-        $all_tickets = $this->get_user_tickets($user_id);
-        $open_tickets = array_filter($all_tickets, function($ticket) {
-            return get_post_meta($ticket->ID, 'status', true) === 'open';
-        });
-       
-        $closed_tickets = array_filter($all_tickets, function($ticket) {
-            return get_post_meta($ticket->ID, 'status', true) === 'closed';
-        });
-       
-        return array(
-            'total' => count($all_tickets),
-            'open' => count($open_tickets),
-            'closed' => count($closed_tickets),
-            'response_rate' => $this->calculate_response_rate($user_id)
-        );
-    }
-
-    private function calculate_response_rate($user_id) {
-        return '95%';
-    }
-
-    private function get_ticket_timeline($ticket_id) {
-        $timeline = array();
-       
-        // Ticket creation
-        $ticket = get_post($ticket_id);
-        $timeline[] = array(
-            'date' => $ticket->post_date,
-            'action' => 'ticket_created',
-            'user' => get_userdata($ticket->post_author),
-            'description' => __('Ticket created', 'support-ticket-system')
-        );
-       
-        // Status changes
-        $status_changes = get_post_meta($ticket_id, 'status_history', true);
-        if ($status_changes) {
-            $timeline = array_merge($timeline, $status_changes);
-        }
-       
-        // Agent assignments
-        $agent_changes = get_post_meta($ticket_id, 'agent_history', true);
-        if ($agent_changes) {
-            $timeline = array_merge($timeline, $agent_changes);
-        }
-       
-        usort($timeline, function($a, $b) {
-            return strtotime($a['date']) - strtotime($b['date']);
-        });
-       
-        return $timeline;
-    }
-
-    public function add_ticket_assignment_interface($ticket_id) {
-        if (!current_user_can('administrator') && !current_user_can('support_agent')) {
-            return;
-        }
-       
-        // Only get users who have been explicitly added as support agents
-        $agents = get_users(array(
-            'meta_key' => 'is_explicit_support_agent',
-            'meta_value' => true,
-            'fields' => array('ID', 'display_name')
-        ));
-       
-        $current_agent = get_post_meta($ticket_id, 'assigned_agent', true);
-       
-        echo '<div class="support-ticket-assignment">';
-        echo '<label for="support-assign-agent">' . __('Assign to:', 'support-ticket-system') . '</label>';
-        echo '<select id="support-assign-agent" data-ticket-id="' . $ticket_id . '">';
-        echo '<option value="">' . __('Unassigned', 'support-ticket-system') . '</option>';
-        foreach ($agents as $agent) {
-            $selected = $current_agent == $agent->ID ? 'selected' : '';
-            echo '<option value="' . $agent->ID . '" ' . $selected . '>' . esc_html($agent->display_name) . '</option>';
-        }
-        echo '</select>';
-        echo '</div>';
+        </body>
+        </html>";
+        
+        wp_mail($to, $subject, $message, $headers);
     }
 }
 
 // Initialize the ticket page functionality
-function support_ticket_page_functions_init() {
-    return Support_Ticket_Page_Functions::get_instance();
+new SupportTicketPage();
+
+
+File 3: Create assets/ticket-style.css
+/* Support Ticket System Styles */
+.sts-ticket-page {
+    max-width: 1000px;
+    margin: 0 auto;
+    padding: 20px;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen-Sans, Ubuntu, Cantarell, "Helvetica Neue", sans-serif;
+}
+
+.sts-container {
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+    overflow: hidden;
+}
+
+.sts-header {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 30px;
+    text-align: center;
+}
+
+.sts-header h1 {
+    margin: 0 0 10px 0;
+    font-size: 2.2em;
+    font-weight: 300;
+}
+
+.sts-header p {
+    margin: 0;
+    opacity: 0.9;
+    font-size: 1.1em;
+}
+
+.sts-form-section {
+    padding: 30px;
+    border-bottom: 1px solid #eee;
+}
+
+.sts-form-section:last-of-type {
+    border-bottom: none;
+}
+
+.sts-form-section h3 {
+    color: #333;
+    margin-bottom: 20px;
+    font-size: 1.3em;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.sts-form-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    margin-bottom: 20px;
+}
+
+.sts-form-group {
+    display: flex;
+    flex-direction: column;
+    margin-bottom: 20px;
+}
+
+.sts-form-group label {
+    font-weight: 600;
+    margin-bottom: 8px;
+    color: #555;
+    font-size: 14px;
+}
+
+.sts-form-group input,
+.sts-form-group select,
+.sts-form-group textarea {
+    padding: 12px 15px;
+    border: 2px solid #e1e5e9;
+    border-radius: 8px;
+    font-size: 15px;
+    transition: all 0.3s ease;
+    background: #fff;
+}
+
+.sts-form-group input:focus,
+.sts-form-group select:focus,
+.sts-form-group textarea:focus {
+    outline: none;
+    border-color: #007cba;
+    box-shadow: 0 0 0 3px rgba(0,124,186,0.1);
+}
+
+.sts-help-text {
+    color: #666;
+    font-size: 12px;
+    margin-top: 5px;
+    font-style: italic;
+}
+
+.sts-field-error {
+    color: #dc3232;
+    font-size: 12px;
+    margin-top: 5px;
+    display: none;
+}
+
+.sts-character-count {
+    text-align: right;
+    font-size: 12px;
+    color: #666;
+    margin-top: 5px;
+}
+
+/* File Upload Styles */
+.sts-file-upload {
+    position: relative;
+    border: 2px dashed #ddd;
+    border-radius: 8px;
+    padding: 30px;
+    text-align: center;
+    transition: all 0.3s ease;
+}
+
+.sts-file-upload:hover {
+    border-color: #007cba;
+}
+
+.sts-file-upload-label {
+    cursor: pointer;
+}
+
+.sts-file-upload-label i {
+    font-size: 2em;
+    color: #007cba;
+    margin-bottom: 10px;
+}
+
+.sts-file-upload input[type="file"] {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    opacity: 0;
+    cursor: pointer;
+}
+
+.sts-file-list {
+    margin-top: 15px;
+}
+
+.sts-file-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px;
+    background: #f8f9fa;
+    border-radius: 6px;
+    margin-bottom: 5px;
+}
+
+/* Checkbox Styles */
+.sts-checkbox-group {
+    margin-bottom: 15px;
+}
+
+.sts-checkbox {
+    display: flex;
+    align-items: flex-start;
+    cursor: pointer;
+    font-weight: normal;
+}
+
+.sts-checkbox input {
+    margin-right: 10px;
+    margin-top: 3px;
+}
+
+/* Submit Section */
+.sts-submit-section {
+    background: #f8f9fa;
+    text-align: center;
+}
+
+.sts-form-actions {
+    display: flex;
+    gap: 15px;
+    justify-content: center;
+    margin-bottom: 30px;
+}
+
+.sts-submit-btn {
+    background: linear-gradient(135deg, #007cba 0%, #005a87 100%);
+    color: white;
+    border: none;
+    padding: 15px 30px;
+    border-radius: 8px;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    transition: all 0.3s ease;
+    position: relative;
+    min-width: 160px;
+    justify-content: center;
+}
+
+.sts-submit-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 5px 15px rgba(0,124,186,0.3);
+}
+
+.sts-submit-btn:disabled {
+    opacity: 0.7;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.sts-reset-btn {
+    background: #6c757d;
+    color: white;
+    border: none;
+    padding: 15px 25px;
+    border-radius: 8px;
+    font-size: 14px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    transition: all 0.3s ease;
+}
+
+.sts-reset-btn:hover {
+    background: #545b62;
+}
+
+.sts-spinner {
+    display: none;
+    width: 20px;
+    height: 20px;
+    border: 2px solid transparent;
+    border-top: 2px solid white;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+.sts-support-info {
+    background: white;
+    padding: 20px;
+    border-radius: 8px;
+    border-left: 4px solid #28a745;
+}
+
+.sts-support-info h4 {
+    margin: 0 0 10px 0;
+    color: #28a745;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.sts-support-info p {
+    margin: 0;
+    color: #666;
+    line-height: 1.5;
+}
+
+/* Success Message */
+.sts-success-message {
+    background: #d4edda;
+    border: 1px solid #c3e6cb;
+    border-radius: 8px;
+    padding: 30px;
+    text-align: center;
+}
+
+.sts-message-icon {
+    font-size: 3em;
+    color: #28a745;
+    margin-bottom: 20px;
+}
+
+.sts-ticket-info {
+    background: white;
+    padding: 15px;
+    border-radius: 6px;
+    margin: 20px 0;
+    border-left: 4px solid #28a745;
+}
+
+.sts-new-ticket-btn {
+    background: #28a745;
+    color: white;
+    border: none;
+    padding: 12px 25px;
+    border-radius: 6px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    transition: all 0.3s ease;
+}
+
+.sts-new-ticket-btn:hover {
+    background: #218838;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    .sts-form-row {
+        grid-template-columns: 1fr;
+    }
+    
+    .sts-ticket-page {
+        padding: 10px;
+    }
+    
+    .sts-form-section {
+        padding: 20px;
+    }
+    
+    .sts-form-actions {
+        flex-direction: column;
+    }
+    
+    .sts-submit-btn,
+    .sts-reset-btn {
+        width: 100%;
+        justify-content: center;
+    }
+}
+
+/* Error States */
+.sts-form-group.error input,
+.sts-form-group.error select,
+.sts-form-group.error textarea {
+    border-color: #dc3232;
+}
+
+.sts-form-group.error .sts-field-error {
+    display: block;
+}
+
+
+File 4: Create assets/ticket-script.js:
+jQuery(document).ready(function($) {
+    'use strict';
+
+    const ticketForm = {
+        init: function() {
+            this.bindEvents();
+            this.initCharacterCount();
+        },
+
+        bindEvents: function() {
+            $('#sts-ticket-form').on('submit', this.handleFormSubmit.bind(this));
+            $('#sts-ticket_description').on('input', this.updateCharacterCount.bind(this));
+            $('#sts_attachments').on('change', this.handleFileSelect.bind(this));
+            $('#sts-new-ticket').on('click', this.resetForm.bind(this));
+            $('.sts-reset-btn').on('click', this.resetForm.bind(this));
+        },
+
+        handleFormSubmit: function(e) {
+            e.preventDefault();
+            
+            if (this.validateForm()) {
+                this.submitForm();
+            }
+        },
+
+        validateForm: function() {
+            let isValid = true;
+            $('.sts-form-group').removeClass('error');
+
+            // Required fields validation
+            $('#sts-ticket-form [required]').each(function() {
+                const $field = $(this);
+                const $formGroup = $field.closest('.sts-form-group');
+                
+                if (!$field.val().trim()) {
+                    $formGroup.addClass('error');
+                    $formGroup.find('.sts-field-error').text('This field is required');
+                    isValid = false;
+                }
+            });
+
+            // Email validation
+            const email = $('#sts_customer_email').val();
+            if (email && !this.isValidEmail(email)) {
+                $('#sts_customer_email').closest('.sts-form-group').addClass('error')
+                    .find('.sts-field-error').text('Please enter a valid email address');
+                isValid = false;
+            }
+
+            // Description length validation
+            const description = $('#sts_ticket_description').val();
+            if (description && description.length < 50) {
+                $('#sts_ticket_description').closest('.sts-form-group').addClass('error')
+                    .find('.sts-field-error').text('Description must be at least 50 characters');
+                isValid = false;
+            }
+
+            return isValid;
+        },
+
+        isValidEmail: function(email) {
+            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            return emailRegex.test(email);
+        },
+
+        submitForm: function() {
+            const $submitBtn = $('#sts-submit-btn');
+            const $btnText = $submitBtn.find('.sts-btn-text');
+            const $spinner = $submitBtn.find('.sts-spinner');
+            
+            // Show loading state
+            $btnText.text('Submitting...');
+            $spinner.show();
+            $submitBtn.prop('disabled', true);
+
+            const formData = new FormData($('#sts-ticket-form')[0]);
+            formData.append('action', 'submit_support_ticket');
+            formData.append('nonce', ticket_ajax.nonce);
+
+            $.ajax({
+                url: ticket_ajax.ajax_url,
+                type: 'POST',
+                data: formData,
+                processData: false,
+                contentType: false,
+                success: (response) => {
+                    if (response.success) {
+                        this.showSuccess(response.data.ticket_id);
+                    } else {
+                        this.showError(response.data.message);
+                    }
+                },
+                error: () => {
+                    this.showError('An error occurred. Please try again.');
+                },
+                complete: () => {
+                    $btnText.text('Submit Ticket');
+                    $spinner.hide();
+                    $submitBtn.prop('disabled', false);
+                }
+            });
+        },
+
+        showSuccess: function(ticketId) {
+            $('#sts-ticket-form').hide();
+            $('#sts-ticket-id').text(ticketId);
+            $('#sts-success-message').show();
+        },
+
+        showError: function(message) {
+            alert('Error: ' + message);
+        },
+
+        initCharacterCount: function() {
+            this.updateCharacterCount();
+        },
+
+        updateCharacterCount: function() {
+            const count = $('#sts_ticket_description').val().length;
+            $('#sts_char_count').text(count);
+            
+            if (count < 50) {
+                $('#sts_char_count').css('color', '#dc3232');
+            } else {
+                $('#sts_char_count').css('color', '#28a745');
+            }
+        },
+
+        handleFileSelect: function(e) {
+            const files = e.target.files;
+            const $fileList = $('#sts-file-list');
+            $fileList.empty();
+
+            if (files.length > 0) {
+                for (let i = 0; i < files.length; i++) {
+                    const file = files[i];
+                    const fileItem = $('<div class="sts-file-item"></div>');
+                    fileItem.html(`
+                        <span>${file.name} (${this.formatFileSize(file.size)})</span>
+                        <span class="sts-file-status">Ready to upload</span>
+                    `);
+                    $fileList.append(fileItem);
+                }
+            }
+        },
+
+        formatFileSize: function(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        },
+
+        resetForm: function() {
+            $('#sts-ticket-form')[0].reset();
+            $('#sts-file-list').empty();
+            $('#sts-success-message').hide();
+            $('#sts-ticket-form').show();
+            $('.sts-form-group').removeClass('error');
+            this.updateCharacterCount();
+        }
+    };
+
+    // Initialize the ticket form
+    ticketForm.init();
+});
+
+
+File 5: create uninstall.php:
+<?php
+/**
+ * Support Ticket System Uninstaller
+ * 
+ * Fired when the plugin is uninstalled. Removes all plugin data, options, 
+ * custom tables, and uploaded files to ensure complete cleanup.
+ * 
+ * @package SupportTicketSystem
+ */
+
+// Prevent direct access
+if (!defined('WP_UNINSTALL_PLUGIN')) {
+    exit;
+}
+
+// Prevent unauthorized access
+if (!current_user_can('activate_plugins')) {
+    wp_die('You do not have permission to uninstall this plugin.');
+}
+
+// Security check - verify the plugin is being uninstalled from the correct location
+$plugin_file = 'support-ticket-system/support-ticket-system.php';
+if (plugin_basename(__FILE__) !== $plugin_file && $_REQUEST['plugin'] !== $plugin_file) {
+    wp_die('Invalid uninstall request.');
+}
+
+/**
+ * Support Ticket System Uninstall Class
+ */
+class STS_Uninstaller {
+    
+    private $wpdb;
+    private $upload_dir;
+    
+    public function __construct() {
+        global $wpdb;
+        $this->wpdb = $wpdb;
+        $this->upload_dir = wp_upload_dir();
+        
+        $this->cleanup_database();
+        $this->cleanup_options();
+        $this->cleanup_custom_tables();
+        $this->cleanup_uploaded_files();
+        $this->cleanup_cron_jobs();
+        $this->clear_caches();
+        $this->log_uninstall();
+    }
+    
+    /**
+     * Clean up all database entries
+     */
+    private function cleanup_database() {
+        // Delete all support ticket custom post types
+        $tickets = get_posts(array(
+            'post_type' => array('support_ticket', 'sts_ticket'),
+            'numberposts' => -1,
+            'post_status' => 'any',
+            'fields' => 'ids'
+        ));
+        
+        foreach ($tickets as $ticket_id) {
+            wp_delete_post($ticket_id, true);
+        }
+        
+        // Delete all ticket replies/comments
+        $comments = get_comments(array(
+            'type' => 'sts_reply',
+            'number' => 0,
+            'fields' => 'ids'
+        ));
+        
+        foreach ($comments as $comment_id) {
+            wp_delete_comment($comment_id, true);
+        }
+        
+        // Clean up user meta related to the plugin
+        $users = get_users(array(
+            'fields' => 'ids',
+            'meta_query' => array(
+                array(
+                    'key' => 'sts_',
+                    'compare' => 'EXISTS'
+                )
+            )
+        ));
+        
+        foreach ($users as $user_id) {
+            // Delete all user meta starting with 'sts_'
+            $user_meta = get_user_meta($user_id);
+            foreach ($user_meta as $meta_key => $meta_value) {
+                if (strpos($meta_key, 'sts_') === 0) {
+                    delete_user_meta($user_id, $meta_key);
+                }
+            }
+        }
+    }
+    
+    /**
+     * Clean up all plugin options
+     */
+    private function cleanup_options() {
+        // Main plugin options
+        $options = array(
+            // Settings options
+            'sts_settings',
+            'sts_license_settings',
+            'sts_email_settings',
+            'sts_general_settings',
+            'sts_advanced_settings',
+            
+            // License and activation
+            'sts_license_key',
+            'sts_license_status',
+            'sts_activation_data',
+            'sts_license_expires',
+            'sts_domain_active',
+            
+            // Version and setup
+            'sts_version',
+            'sts_db_version',
+            'sts_install_date',
+            'sts_activation_date',
+            
+            // Temporary data
+            'sts_setup_wizard',
+            'sts_welcome_dismissed',
+            'sts_review_dismissed',
+            
+            // Statistics and analytics
+            'sts_ticket_stats',
+            'sts_performance_data',
+            'sts_usage_stats',
+            'sts_dashboard_data',
+        );
+        
+        foreach ($options as $option) {
+            delete_option($option);
+            delete_site_option($option); // For multisite
+        }
+        
+        // Clean up network options in multisite
+        if (is_multisite()) {
+            $sites = get_sites();
+            foreach ($sites as $site) {
+                switch_to_blog($site->blog_id);
+                
+                foreach ($options as $option) {
+                    delete_option($option);
+                }
+                
+                restore_current_blog();
+            }
+        }
+    }
+    
+    /**
+     * Clean up transients and cached data
+     */
+    private function cleanup_transients() {
+        $transients = array(
+            // License and update transients
+            'sts_license_check',
+            'sts_update_check',
+            'sts_remote_data',
+            
+            // Statistics transients
+            'sts_ticket_count',
+            'sts_open_tickets',
+            'sts_closed_tickets',
+            'sts_response_time',
+            
+            // Dashboard transients
+            'sts_dashboard_widget',
+            'sts_recent_tickets',
+            'sts_activity_log',
+            
+            // System transients
+            'sts_system_status',
+            'sts_debug_info',
+            'sts_performance_cache',
+        );
+        
+        foreach ($transients as $transient) {
+            delete_transient($transient);
+            delete_site_transient($transient); // For multisite
+        }
+        
+        // Clean up all transients with sts prefix
+        $this->wpdb->query(
+            "DELETE FROM {$this->wpdb->options} 
+            WHERE option_name LIKE '_transient_sts_%' 
+            OR option_name LIKE '_transient_timeout_sts_%'"
+        );
+        
+        // For multisite
+        $this->wpdb->query(
+            "DELETE FROM {$this->wpdb->sitemeta} 
+            WHERE meta_key LIKE '_site_transient_sts_%' 
+            OR meta_key LIKE '_site_transient_timeout_sts_%'"
+        );
+    }
+    
+    /**
+     * Clean up custom database tables
+     */
+    private function cleanup_custom_tables() {
+        $tables = array(
+            $this->wpdb->prefix . 'sts_tickets',
+            $this->wpdb->prefix . 'sts_ticket_meta',
+            $this->wpdb->prefix . 'sts_ticket_replies',
+            $this->wpdb->prefix . 'sts_attachments',
+            $this->wpdb->prefix . 'sts_customers',
+            $this->wpdb->prefix . 'sts_products',
+            $this->wpdb->prefix . 'sts_licenses',
+            $this->wpdb->prefix . 'sts_activity_log',
+            $this->wpdb->prefix . 'sts_email_queue',
+            $this->wpdb->prefix . 'sts_sessions',
+        );
+        
+        foreach ($tables as $table) {
+            if ($this->wpdb->get_var("SHOW TABLES LIKE '$table'") === $table) {
+                $this->wpdb->query("DROP TABLE IF EXISTS $table");
+            }
+        }
+        
+        // Clean up multisite tables
+        if (is_multisite()) {
+            $sites = get_sites();
+            foreach ($sites as $site) {
+                $blog_prefix = $this->wpdb->get_blog_prefix($site->blog_id);
+                
+                $multisite_tables = array(
+                    $blog_prefix . 'sts_tickets',
+                    $blog_prefix . 'sts_ticket_meta',
+                );
+                
+                foreach ($multisite_tables as $table) {
+                    if ($this->wpdb->get_var("SHOW TABLES LIKE '$table'") === $table) {
+                        $this->wpdb->query("DROP TABLE IF EXISTS $table");
+                    }
+                }
+            }
+        }
+    }
+    
+    /**
+     * Clean up uploaded files and directories
+     */
+    private function cleanup_uploaded_files() {
+        $upload_dirs = array(
+            $this->upload_dir['basedir'] . '/support-tickets/',
+            $this->upload_dir['basedir'] . '/sts-attachments/',
+            $this->upload_dir['basedir'] . '/ticket-uploads/',
+            $this->upload_dir['basedir'] . '/sts-logs/',
+            $this->upload_dir['basedir'] . '/sts-exports/',
+            $this->upload_dir['basedir'] . '/sts-temp/',
+        );
+        
+        foreach ($upload_dirs as $dir) {
+            if (file_exists($dir)) {
+                $this->delete_directory($dir);
+            }
+        }
+        
+        // Clean up any .htaccess files created by the plugin
+        $htaccess_files = array(
+            $this->upload_dir['basedir'] . '/support-tickets/.htaccess',
+            $this->upload_dir['basedir'] . '/sts-attachments/.htaccess',
+        );
+        
+        foreach ($htaccess_files as $file) {
+            if (file_exists($file)) {
+                @unlink($file);
+            }
+        }
+    }
+    
+    /**
+     * Clean up scheduled cron jobs
+     */
+    private function cleanup_cron_jobs() {
+        $cron_hooks = array(
+            'sts_daily_maintenance',
+            'sts_license_check',
+            'sts_stats_cleanup',
+            'sts_email_digest',
+            'sts_auto_close_tickets',
+            'sts_backup_tickets',
+            'sts_performance_optimization',
+        );
+        
+        foreach ($cron_hooks as $hook) {
+            wp_clear_scheduled_hook($hook);
+            
+            // Clear all scheduled events for this hook
+            $cron = get_option('cron');
+            if (!empty($cron)) {
+                foreach ($cron as $timestamp => $cronhooks) {
+                    if (isset($cronhooks[$hook])) {
+                        unset($cron[$timestamp][$hook]);
+                    }
+                }
+                update_option('cron', $cron);
+            }
+        }
+    }
+    
+    /**
+     * Clear various caches
+     */
+    private function clear_caches() {
+        // Clear WordPress object cache
+        wp_cache_flush();
+        
+        // Clear popular caching plugins
+        $this->clear_caching_plugins();
+        
+        // Clear rewrite rules
+        flush_rewrite_rules();
+    }
+    
+    /**
+     * Clear popular caching plugins
+     */
+    private function clear_caching_plugins() {
+        // W3 Total Cache
+        if (function_exists('w3tc_flush_all')) {
+            w3tc_flush_all();
+        }
+        
+        // WP Super Cache
+        if (function_exists('wp_cache_clear_cache')) {
+            wp_cache_clear_cache();
+        }
+        
+        // WP Rocket
+        if (function_exists('rocket_clean_domain')) {
+            rocket_clean_domain();
+        }
+        
+        // LiteSpeed Cache
+        if (class_exists('LiteSpeed_Cache_API')) {
+            LiteSpeed_Cache_API::purge_all();
+        }
+        
+        // Hummingbird
+        if (class_exists('Hummingbird\\WP_Hummingbird')) {
+            do_action('wphb_clear_page_cache');
+        }
+        
+        // Autoptimize
+        if (class_exists('autoptimizeCache')) {
+            autoptimizeCache::clearall();
+        }
+        
+        // WP Optimize
+        if (class_exists('WP_Optimize')) {
+            WP_Optimize()->get_page_cache()->purge();
+        }
+        
+        // Cache Enabler
+        if (has_action('ce_clear_cache')) {
+            do_action('ce_clear_cache');
+        }
+        
+        // Comet Cache
+        if (class_exists('comet_cache')) {
+            comet_cache::clear();
+        }
+        
+        // Hyper Cache
+        if (class_exists('HyperCache')) {
+            do_action('hyper_cache_clean');
+        }
+    }
+    
+    /**
+     * Log uninstall for debugging (optional)
+     */
+    private function log_uninstall() {
+        // Only log if debugging is enabled
+        if (defined('WP_DEBUG') && WP_DEBUG) {
+            $log_entry = sprintf(
+                "Support Ticket System uninstalled on %s by user %s from IP %s",
+                current_time('mysql'),
+                get_current_user_id(),
+                $_SERVER['REMOTE_ADDR'] ?? 'unknown'
+            );
+            
+            error_log($log_entry);
+        }
+    }
+    
+    /**
+     * Recursively delete a directory
+     */
+    private function delete_directory($dir) {
+        if (!file_exists($dir)) {
+            return true;
+        }
+        
+        if (!is_dir($dir)) {
+            return unlink($dir);
+        }
+        
+        foreach (scandir($dir) as $item) {
+            if ($item == '.' || $item == '..') {
+                continue;
+            }
+            
+            if (!$this->delete_directory($dir . DIRECTORY_SEPARATOR . $item)) {
+                return false;
+            }
+        }
+        
+        return rmdir($dir);
+    }
+}
+
+/**
+ * Check if we should remove all data or keep it
+ */
+$remove_all_data = true; // Set to false if you want to keep data
+
+if ($remove_all_data) {
+    // Initialize the uninstaller
+    new STS_Uninstaller();
+    
+    // Final cleanup of any remaining options
+    $final_cleanup_options = array(
+        'sts_uninstall_time',
+        'sts_last_backup',
+        'sts_migration_data',
+    );
+    
+    foreach ($final_cleanup_options as $option) {
+        delete_option($option);
+        delete_site_option($option);
+    }
+}
+
+// Display success message (only in CLI or with debugging)
+if (defined('WP_CLI') && WP_CLI) {
+    WP_CLI::success('Support Ticket System has been completely uninstalled and all data removed.');
 }
